@@ -55,6 +55,7 @@ export default function Page() {
   const [time, setTime] = useState<number>(0)
   const [isPlaying, setIsPlaying] = useState<boolean>(false)
   const [editing, setEditing] = useState<boolean>(true)
+  const [cuePoint, setCuePoint] = useState<number | null>(null)
 
   const [drag, setDrag] = useState<Drag | null>(null)
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false)
@@ -103,8 +104,8 @@ export default function Page() {
     return (x / box.width) * duration
   }
 
-  const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing })
-  latest.current = { drag, hypotheticalReel, duration, isScrubbing }
+  const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint })
+  latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint }
 
   // Sync song audio play/pause state
   useEffect(() => {
@@ -129,12 +130,13 @@ export default function Page() {
   // Automatic looping when reaching max duration
   useEffect(() => {
     if (time >= maxDur && isPlaying) {
-      setTime(0)
+      const resetTime = cuePoint !== null ? cuePoint : 0
+      setTime(resetTime)
       if (audioRef.current) {
-        audioRef.current.currentTime = 0
+        audioRef.current.currentTime = resetTime
       }
     }
-  }, [time, maxDur, isPlaying])
+  }, [time, maxDur, isPlaying, cuePoint])
 
   // Global Keyboard Shortcuts (Spacebar & Arrow Keys) with capture phase for reliable global handling
   useEffect(() => {
@@ -153,7 +155,26 @@ export default function Page() {
       if (e.code === 'Space') {
         e.preventDefault()
         e.stopPropagation()
-        setIsPlaying((prev) => !prev)
+        setIsPlaying((prev) => {
+          const willPlay = !prev
+          const activeCue = latest.current.cuePoint
+          if (willPlay) {
+            const startT = activeCue !== null ? activeCue : time
+            setTime(startT)
+            if (audioRef.current) {
+              audioRef.current.currentTime = startT
+            }
+            return true
+          } else {
+            if (activeCue !== null) {
+              setTime(activeCue)
+              if (audioRef.current) {
+                audioRef.current.currentTime = activeCue
+              }
+            }
+            return false
+          }
+        })
       } else if (e.code === 'ArrowRight') {
         e.preventDefault()
         e.stopPropagation()
@@ -295,7 +316,13 @@ export default function Page() {
               setTime(e.currentTarget.currentTime)
             }
           }}
-          onEnded={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false)
+            if (cuePoint !== null) {
+              setTime(cuePoint)
+              if (audioRef.current) audioRef.current.currentTime = cuePoint
+            }
+          }}
         />
       )}
 
@@ -387,6 +414,7 @@ export default function Page() {
               <div className="flex items-center h-6 bg-black relative">
                 <div className="w-full h-2 bg-transparent relative">
                   {beats.map((b, i) => {
+                    const isCue = cuePoint === b
                     const isActive = time >= b && time < b + beatDuration
                     return (
                       <div
@@ -394,14 +422,28 @@ export default function Page() {
                         style={{ left: pct(b) }}
                         onPointerDown={(e) => {
                           e.stopPropagation()
+                          setCuePoint(b)
                           setTime(b)
+                          if (audioRef.current) {
+                            audioRef.current.currentTime = b
+                          }
                         }}
                         className={cn(
-                          'absolute top-0 bottom-0 w-[2px] -ml-[1px] cursor-pointer z-10 transition-colors',
-                          isActive ? 'bg-cream' : 'bg-white/40 hover:bg-cream/60',
+                          'absolute top-0 bottom-0 w-[12px] -ml-[6px] cursor-pointer z-10 flex items-center justify-center group',
                         )}
-                        title={`Beat: ${b}s`}
-                      />
+                        title={`Cue Beat: ${b}s`}
+                      >
+                        <div
+                          className={cn(
+                            'h-full transition-all rounded-xs',
+                            isCue
+                              ? 'w-[4px] bg-yellow-200/80 border border-yellow-300/60 shadow-[0_0_8px_rgba(253,224,71,0.4)]'
+                              : isActive
+                              ? 'w-[2px] bg-cream'
+                              : 'w-[2px] bg-white/40 group-hover:bg-cream/60',
+                          )}
+                        />
+                      </div>
                     )
                   })}
                 </div>
@@ -409,7 +451,7 @@ export default function Page() {
 
               {/* Video & Lyric Wrapper containing the continuous playhead */}
               <div className="relative flex flex-col">
-                {/* Playhead line matched to beat tick thickness (w-[2px] -ml-[1px]) */}
+                {/* Playhead line matched to beat tick thickness */}
                 <div
                   aria-hidden="true"
                   style={{ left: pct(time) }}
