@@ -89,7 +89,7 @@ export function FontPanel({
   return (
     <Panel
       n="03"
-      title="TYPE"
+      title="FONT"
       meta={
         <div className="relative pointer-events-auto">
           <button

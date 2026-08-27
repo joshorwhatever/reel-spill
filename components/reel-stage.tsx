@@ -241,7 +241,7 @@ export function ReelStage({
             className="flex items-center gap-2 rounded-md border border-white/20 bg-black/80 px-2.5 py-1 backdrop-blur-md transition hover:bg-black shadow-lg"
           >
             <span className="max-w-[120px] truncate font-mono text-[10px] uppercase tracking-wider text-white">
-              {reel?.name || 'Select Output'}
+              {reel?.name || 'Select Spill'}
             </span>
             <ChevronDown className="h-3 w-3 text-white/70" />
           </button>

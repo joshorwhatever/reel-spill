@@ -65,7 +65,7 @@ export function OutputPanel({
   return (
     <Panel
       n="04"
-      title="OUTPUT"
+      title="SPILL"
       meta={<div className="font-mono text-[11px]">{renderStatus()}</div>}
     >
       <div className="flex flex-col h-full min-h-0 gap-3">

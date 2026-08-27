@@ -301,7 +301,8 @@ export default function Page() {
         return
       }
 
-      if (!d || !dragSnapshot.current) return
+      const currentSnapshot = dragSnapshot.current
+      if (!d || !currentSnapshot) return
       const delta = ((e.clientX - d.originX) / box.width) * dur
       const reelDur = curReel.duration
 
@@ -312,12 +313,12 @@ export default function Page() {
           if (d.type === 'lyric') {
             return {
               ...r,
-              lyrics: handleTrackDrag(dragSnapshot.current!.lyrics, d, delta, reelDur, snapToBeat),
+              lyrics: handleTrackDrag(currentSnapshot.lyrics || [], d, delta, reelDur, snapToBeat),
             }
           } else {
             return {
               ...r,
-              clips: handleTrackDrag(dragSnapshot.current!.clips, d, delta, reelDur, snapToBeat),
+              clips: handleTrackDrag(currentSnapshot.clips || [], d, delta, reelDur, snapToBeat),
             }
           }
         })
@@ -388,10 +389,14 @@ export default function Page() {
 
       <main className="flex flex-1 flex-col overflow-hidden space-y-3">
         <div className="grid flex-1 grid-cols-2 grid-rows-2 gap-3 overflow-hidden">
+          {/* Top-Left: 1. SONG */}
           <SongPanel
             song={song}
             onChange={(patch) => setSong((s) => ({ ...s, ...patch }))}
           />
+          {/* Top-Right: 2. CONTENT */}
+          <ContentPanel assets={assets} onChange={setAssets} />
+          {/* Bottom-Left: 3. FONT */}
           <FontPanel
             style={style}
             onChange={(patch) =>
@@ -430,7 +435,7 @@ export default function Page() {
             onUploadFont={(f) => setCustomFonts((prev) => [...prev, f])}
             onSpill={handleSpill}
           />
-          <ContentPanel assets={assets} onChange={setAssets} />
+          {/* Bottom-Right: 4. SPILL */}
           <OutputPanel
             reels={reels}
             selectedId={activeReel?.id || null}
