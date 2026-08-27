@@ -101,11 +101,19 @@ export default function Page() {
   const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing })
   latest.current = { drag, hypotheticalReel, duration, isScrubbing }
 
-  // Global Keyboard Shortcuts (Spacebar & Arrow Keys)
+  // Global Keyboard Shortcuts (Spacebar & Arrow Keys) - Allows sliders/buttons, blocks only text inputs
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const targetTag = (e.target as HTMLElement).tagName.toLowerCase()
-      if (['input', 'textarea'].includes(targetTag)) return
+      const target = e.target as HTMLElement
+      const targetTag = target.tagName.toLowerCase()
+      const isTextInput =
+        targetTag === 'textarea' ||
+        (targetTag === 'input' &&
+          ['text', 'number', 'search', 'email', 'password', 'url'].includes(
+            (target as HTMLInputElement).type
+          ))
+
+      if (isTextInput) return
 
       const maxDur = activeReel ? activeReel.duration : song.duration || 32
 
@@ -125,19 +133,18 @@ export default function Page() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [beatDuration, activeReel, song.duration])
 
-  // Playback Timer Loop
+  // Playback Timer Loop (30fps with automatic Reel/TikTok Looping)
   useEffect(() => {
     if (!isPlaying) return
     const maxDur = activeReel ? activeReel.duration : song.duration || 32
     const interval = setInterval(() => {
       setTime((t) => {
         if (t >= maxDur) {
-          setIsPlaying(false)
-          return 0
+          return 0 // Loops back to start seamlessly without stopping playback
         }
-        return +(t + 0.05).toFixed(3)
+        return +(t + 0.033).toFixed(3)
       })
-    }, 50)
+    }, 33)
     return () => clearInterval(interval)
   }, [isPlaying, activeReel, song.duration])
 
@@ -241,6 +248,7 @@ export default function Page() {
           />
           <FontPanel
             style={style}
+            onChange={(patch) => setStyle((s) => ({ ...s, ...patch }))}
             onChangeStyle={(patch) => setStyle((s) => ({ ...s, ...patch }))}
             customFonts={customFonts}
             onUploadFont={(f) => setCustomFonts((prev) => [...prev, f])}
@@ -403,6 +411,7 @@ export default function Page() {
           onSelectReel={setSelectedId}
           reel={activeReel}
           time={time}
+          isPlaying={isPlaying}
           assetMap={assetMap}
           style={style}
           customFonts={customFonts}

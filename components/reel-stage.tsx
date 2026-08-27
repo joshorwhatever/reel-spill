@@ -97,12 +97,14 @@ export function ReelStage({
       }
     } else {
       video.pause()
-      video.currentTime = targetTime
+      if (Math.abs(video.currentTime - targetTime) > 0.05) {
+        video.currentTime = targetTime
+      }
     }
   }, [time, isPlaying, currentClip, asset])
 
-  // Canvas frame & lyric text rendering loop reacting to all style changes
-  useEffect(() => {
+  // Core canvas rendering function
+  const drawCanvasFrame = () => {
     if (!canvasRef.current || !videoRef.current) return
 
     const canvas = canvasRef.current
@@ -110,63 +112,67 @@ export function ReelStage({
     const video = videoRef.current
     if (!ctx) return
 
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    if (asset && video.readyState >= 2) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    } else {
+      ctx.fillStyle = '#0a0a0a'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+    }
+
+    if (currentLine?.text) {
+      const textToDraw = style.uppercase
+        ? currentLine.text.toUpperCase()
+        : currentLine.text
+
+      // Resolve font family safely and apply to canvas context
+      const fontInfo = resolveFont(style.fontId, customFonts)
+      const fontFamily = fontInfo?.stack || fontInfo?.family || 'sans-serif'
+      const fontSize = style.size * 2.2
+
+      ctx.font = `700 ${fontSize}px ${fontFamily}`
+
+      if ('letterSpacing' in ctx) {
+        ctx.letterSpacing = `${style.tracking || 0}em`
+      }
+
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      const centerX = canvas.width / 2
+      let centerY = canvas.height / 2
+
+      if (style.align === 'top') centerY = canvas.height * 0.2
+      if (style.align === 'bottom') centerY = canvas.height * 0.8
+
+      if (style.shadow) {
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.9)'
+        ctx.shadowBlur = 18
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 4
+      } else {
+        ctx.shadowColor = 'transparent'
+        ctx.shadowBlur = 0
+      }
+
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(textToDraw, centerX, centerY)
+    }
+  }
+
+  // Animation loop & reaction to style/time updates
+  useEffect(() => {
     let animationId: number
 
-    const drawFrame = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-      if (asset && video.readyState >= 2) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-      } else {
-        ctx.fillStyle = '#0a0a0a'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-      }
-
-      if (currentLine?.text) {
-        const textToDraw = style.uppercase
-          ? currentLine.text.toUpperCase()
-          : currentLine.text
-
-        // Resolve font family safely and apply to canvas context
-        const fontInfo = resolveFont(style.fontId, customFonts)
-        const fontFamily = fontInfo?.stack || fontInfo?.family || 'sans-serif'
-        const fontSize = style.size * 2.2
-
-        ctx.font = `700 ${fontSize}px ${fontFamily}`
-
-        if ('letterSpacing' in ctx) {
-          ctx.letterSpacing = `${style.tracking || 0}em`
-        }
-
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-
-        const centerX = canvas.width / 2
-        let centerY = canvas.height / 2
-
-        if (style.align === 'top') centerY = canvas.height * 0.2
-        if (style.align === 'bottom') centerY = canvas.height * 0.8
-
-        if (style.shadow) {
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)'
-          ctx.shadowBlur = 18
-          ctx.shadowOffsetX = 0
-          ctx.shadowOffsetY = 4
-        } else {
-          ctx.shadowColor = 'transparent'
-          ctx.shadowBlur = 0
-        }
-
-        ctx.fillStyle = '#ffffff'
-        ctx.fillText(textToDraw, centerX, centerY)
-      }
-
+    const renderLoop = () => {
+      drawCanvasFrame()
       if (isPlaying) {
-        animationId = requestAnimationFrame(drawFrame)
+        animationId = requestAnimationFrame(renderLoop)
       }
     }
 
-    drawFrame()
+    renderLoop()
 
     return () => {
       if (animationId) cancelAnimationFrame(animationId)
@@ -188,10 +194,13 @@ export function ReelStage({
                 ref={videoRef}
                 src={asset.url}
                 aria-hidden="true"
-                className="hidden"
+                className="absolute inset-0 opacity-0 pointer-events-none object-cover"
                 playsInline
                 muted
                 preload="auto"
+                onSeeked={drawCanvasFrame}
+                onLoadedData={drawCanvasFrame}
+                onTimeUpdate={drawCanvasFrame}
               />
             )}
 
