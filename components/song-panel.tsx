@@ -22,8 +22,10 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
   const beatDuration = 60 / (song.bpm || 120)
 
   const lyricLines = song.lyrics
-    ? song.lyrics.split('\n').map((l) => l.trim()).filter(Boolean)
+    ? song.lyrics.split('\n')
     : []
+
+  const validLinesCount = lyricLines.filter((l) => l.trim()).length
 
   const handleFile = (file: File) => {
     const url = URL.createObjectURL(file)
@@ -112,42 +114,43 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
                 />
               </Field>
             </div>
+            
             <div className="flex flex-col gap-1 flex-1 min-h-0">
               <span className="font-mono text-[9px] uppercase tracking-widest text-white/50">
-                LYRICS — {lyricLines.length} LINES
+                LYRICS — {validLinesCount} LINES
               </span>
-              <textarea
-                rows={2}
-                value={song.lyrics}
-                onChange={(e) => onChange({ lyrics: e.target.value })}
-                placeholder="one line per row&#10;the engine weights each line by syllables"
-                className="bg-black border border-border p-2 font-mono text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-cream/60 resize-none shrink-0"
-              />
               
-              {/* Draggable individual lyric lines list */}
-              {lyricLines.length > 0 && (
-                <div className="flex flex-col gap-1 flex-1 min-h-0 overflow-y-auto mt-1 pr-1">
-                  <span className="font-mono text-[8px] uppercase tracking-wider text-cream-dim/70">
-                    Drag lines to timeline:
-                  </span>
-                  <div className="flex flex-col gap-1">
-                    {lyricLines.map((line, idx) => (
-                      <div
-                        key={idx}
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', line)
-                        }}
-                        className="flex items-center gap-1.5 bg-black border border-border/80 hover:border-yellow-300/50 hover:bg-yellow-200/10 px-2 py-1 cursor-grab active:cursor-grabbing transition-colors"
-                        title="Drag onto lyric timeline track"
-                      >
-                        <GripVertical className="h-3 w-3 text-white/40 shrink-0" />
-                        <span className="font-mono text-[10px] text-white/90 truncate">{line}</span>
+              <div className="relative flex-1 min-h-0 border border-border bg-black focus-within:border-cream/60">
+                <textarea
+                  value={song.lyrics}
+                  onChange={(e) => onChange({ lyrics: e.target.value })}
+                  placeholder={'one line per row\nthe engine weights each line by syllables'}
+                  className="w-full h-full bg-transparent p-3 pl-8 font-mono text-xs text-white placeholder:text-white/20 focus:outline-none resize-none leading-[22px]"
+                />
+
+                {/* Left drag handles layer with clearance */}
+                <div className="absolute top-0 left-0 bottom-0 pointer-events-none p-3 flex flex-col leading-[22px]">
+                  {lyricLines.map((line, idx) => {
+                    const hasText = line.trim().length > 0
+                    return (
+                      <div key={idx} className="h-[22px] flex items-center">
+                        {hasText && (
+                          <div
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('text/plain', line.trim())
+                            }}
+                            className="pointer-events-auto cursor-grab active:cursor-grabbing text-yellow-300 hover:text-yellow-200 transition-colors"
+                            title="Drag line to timeline"
+                          >
+                            <GripVertical className="h-3.5 w-3.5" />
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })}
                 </div>
-              )}
+              </div>
             </div>
           </div>
         )}

@@ -16,7 +16,6 @@ import type {
   ReelMode,
   SongState,
   VideoAsset,
-  VideoClip,
 } from '@/lib/types'
 
 type Drag = {
@@ -28,22 +27,23 @@ type Drag = {
   end: number
 }
 
-// Active overwrite/trim logic: dragging clip edges dynamically resizes or deletes overtaken neighbor clips
-function handleClipDrag(
-  clips: VideoClip[],
+// Dynamic preview calculation operating against an immutable snapshot array
+function handleTrackDrag<T extends { id: string; start: number; end: number }>(
+  items: T[],
   drag: Drag,
   delta: number,
   reelDur: number,
   snapToBeat: (t: number) => number
-): VideoClip[] {
+): T[] {
   const minLen = 0.08
   const { id, edge, start: origStart, end: origEnd } = drag
 
-  const targetIdx = clips.findIndex((c) => c.id === id)
-  if (targetIdx === -1) return clips
+  const targetIdx = items.findIndex((item) => item.id === id)
+  if (targetIdx === -1) return items
 
-  const updatedClips = clips.map((c) => ({ ...c }))
-  const target = updatedClips[targetIdx]
+  // Deep clone items from original drag snapshot to preserve original bounds
+  const sorted = items.map((item) => ({ ...item })).sort((a, b) => a.start - b.start)
+  const target = sorted.find((item) => item.id === id)!
 
   if (edge === 'move') {
     const len = origEnd - origStart
@@ -51,7 +51,7 @@ function handleClipDrag(
     const start = snapToBeat(rawStart)
     target.start = +start.toFixed(3)
     target.end = +(start + len).toFixed(3)
-    return updatedClips
+    return sorted
   }
 
   if (edge === 'right') {
@@ -59,20 +59,19 @@ function handleClipDrag(
     const newEnd = snapToBeat(rawEnd)
     target.end = +newEnd.toFixed(3)
 
-    return updatedClips.filter((c) => {
-      if (c.id === id) return true
+    return sorted.filter((item) => {
+      if (item.id === id) return true
 
-      // Evaluate neighbor clips to the right
-      if (c.end > target.start) {
-        if (target.end >= c.end) {
-          // Entire clip covered -> Delete
+      if (item.start < target.end && item.end > target.start) {
+        if (target.end >= item.end) {
+          // Hidden during drag preview
           return false
-        } else if (target.end > c.start) {
-          // Overlapping clip start -> Truncate start
-          c.start = target.end
+        } else {
+          // Non-destructive truncation of start
+          item.start = target.end
         }
       }
-      return c.end - c.start >= 0.01
+      return item.end - item.start >= 0.01
     })
   }
 
@@ -81,24 +80,23 @@ function handleClipDrag(
     const newStart = snapToBeat(rawStart)
     target.start = +newStart.toFixed(3)
 
-    return updatedClips.filter((c) => {
-      if (c.id === id) return true
+    return sorted.filter((item) => {
+      if (item.id === id) return true
 
-      // Evaluate neighbor clips to the left
-      if (c.start < target.end) {
-        if (target.start <= c.start) {
-          // Entire clip covered -> Delete
+      if (item.end > target.start && item.start < target.end) {
+        if (target.start <= item.start) {
+          // Hidden during drag preview
           return false
-        } else if (target.start < c.end) {
-          // Overlapping clip end -> Truncate end
-          c.end = target.start
+        } else {
+          // Non-destructive truncation of end
+          item.end = target.start
         }
       }
-      return c.end - c.start >= 0.01
+      return item.end - item.start >= 0.01
     })
   }
 
-  return updatedClips
+  return sorted
 }
 
 export default function Page() {
@@ -134,7 +132,10 @@ export default function Page() {
 
   const [drag, setDrag] = useState<Drag | null>(null)
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false)
-  
+
+  // Initial snapshot ref to allow non-destructive undo while dragging
+  const dragSnapshot = useRef<{ clips: any[]; lyrics: any[] } | null>(null)
+
   const trackAreaRef = useRef<HTMLDivElement | null>(null)
   const innerTrackRef = useRef<HTMLDivElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -179,6 +180,16 @@ export default function Page() {
 
   const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel })
   latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel }
+
+  const startDragging = (dragInfo: Drag) => {
+    if (activeReel) {
+      dragSnapshot.current = {
+        clips: JSON.parse(JSON.stringify(activeReel.clips)),
+        lyrics: JSON.parse(JSON.stringify(activeReel.lyrics)),
+      }
+    }
+    setDrag(dragInfo)
+  }
 
   useEffect(() => {
     const audio = audioRef.current
@@ -290,9 +301,8 @@ export default function Page() {
         return
       }
 
-      if (!d) return
+      if (!d || !dragSnapshot.current) return
       const delta = ((e.clientX - d.originX) / box.width) * dur
-      const min = 0.08
       const reelDur = curReel.duration
 
       setReels((prev) =>
@@ -302,29 +312,12 @@ export default function Page() {
           if (d.type === 'lyric') {
             return {
               ...r,
-              lyrics: r.lyrics.map((l) => {
-                if (l.id !== d.id) return l
-                if (d.edge === 'move') {
-                  const len = d.end - d.start
-                  const start = snapToBeat(Math.max(0, Math.min(reelDur - len, d.start + delta)))
-                  return {
-                    ...l,
-                    start: +start.toFixed(3),
-                    end: +(start + len).toFixed(3),
-                  }
-                } else if (d.edge === 'left') {
-                  const start = snapToBeat(Math.max(0, Math.min(d.end - min, d.start + delta)))
-                  return { ...l, start: +start.toFixed(3) }
-                } else {
-                  const end = snapToBeat(Math.min(reelDur, Math.max(d.start + min, d.end + delta)))
-                  return { ...l, end: +end.toFixed(3) }
-                }
-              }),
+              lyrics: handleTrackDrag(dragSnapshot.current!.lyrics, d, delta, reelDur, snapToBeat),
             }
           } else {
             return {
               ...r,
-              clips: handleClipDrag(r.clips, d, delta, reelDur, snapToBeat),
+              clips: handleTrackDrag(dragSnapshot.current!.clips, d, delta, reelDur, snapToBeat),
             }
           }
         })
@@ -334,6 +327,7 @@ export default function Page() {
     const stop = () => {
       setDrag(null)
       setIsScrubbing(false)
+      dragSnapshot.current = null
     }
 
     window.addEventListener('pointermove', move)
@@ -519,7 +513,7 @@ export default function Page() {
                   className="pointer-events-none absolute inset-y-0 w-[2px] -ml-[1px] bg-cream z-40"
                 />
 
-                {/* Track 2: video (Opaque elements with elevated Z-index on active drag) */}
+                {/* Track 2: video */}
                 <div className="h-8 bg-black flex items-stretch border-b-2 border-border relative">
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
                     {clips.map((c) => {
@@ -533,7 +527,7 @@ export default function Page() {
                             e.stopPropagation()
                             if (activeReel) setSelectedId(activeReel.id)
                             if (!editing) return
-                            setDrag({
+                            startDragging({
                               id: c.id,
                               type: 'clip',
                               edge: 'move',
@@ -559,7 +553,7 @@ export default function Page() {
                                 onPointerDown={(e) => {
                                   e.stopPropagation()
                                   if (activeReel) setSelectedId(activeReel.id)
-                                  setDrag({
+                                  startDragging({
                                     id: c.id,
                                     type: 'clip',
                                     edge,
@@ -622,7 +616,7 @@ export default function Page() {
                             if (activeReel) setSelectedId(activeReel.id)
                             setSelectedLyricId(l.id)
                             if (!editing) return
-                            setDrag({
+                            startDragging({
                               id: l.id,
                               type: 'lyric',
                               edge: 'move',
@@ -652,7 +646,7 @@ export default function Page() {
                                   e.stopPropagation()
                                   if (activeReel) setSelectedId(activeReel.id)
                                   setSelectedLyricId(l.id)
-                                  setDrag({
+                                  startDragging({
                                     id: l.id,
                                     type: 'lyric',
                                     edge,
