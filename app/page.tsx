@@ -40,6 +40,7 @@ export default function Page() {
   const [customFonts, setCustomFonts] = useState<CustomFont[]>([])
   const [reels, setReels] = useState<Reel[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedLyricId, setSelectedLyricId] = useState<string | null>(null)
   const [modes, setModes] = useState<ReelMode[]>([])
   const [baseName, setBaseName] = useState<string>('')
 
@@ -104,8 +105,8 @@ export default function Page() {
     return (x / box.width) * duration
   }
 
-  const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint })
-  latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint }
+  const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel })
+  latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel }
 
   // Sync song audio play/pause state
   useEffect(() => {
@@ -138,7 +139,7 @@ export default function Page() {
     }
   }, [time, maxDur, isPlaying, cuePoint])
 
-  // Global Keyboard Shortcuts (Spacebar & Arrow Keys) with capture phase for reliable global handling
+  // Global Keyboard Shortcuts (Spacebar, Arrow Keys, Backspace/Delete)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
@@ -183,6 +184,22 @@ export default function Page() {
         e.preventDefault()
         e.stopPropagation()
         setTime((t) => Math.max(0, +(t - beatDuration).toFixed(3)))
+      } else if (e.code === 'Backspace' || e.code === 'Delete') {
+        const { selectedLyricId: selLyric, activeReel: curReel } = latest.current
+        if (selLyric && curReel) {
+          e.preventDefault()
+          e.stopPropagation()
+          setReels((prev) =>
+            prev.map((r) => {
+              if (r.id !== curReel.id) return r
+              return {
+                ...r,
+                lyrics: r.lyrics.filter((l) => l.id !== selLyric),
+              }
+            })
+          )
+          setSelectedLyricId(null)
+        }
       }
     }
 
@@ -190,14 +207,14 @@ export default function Page() {
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
   }, [beatDuration, maxDur])
 
-  // Timeline Drag & Scrub Listeners (handles both clips and lyrics with beat snapping)
+  // Timeline Drag & Scrub Listeners
   useEffect(() => {
     if (!drag && !isScrubbing) return
 
     const move = (e: PointerEvent) => {
-      const { drag: d, duration: dur, isScrubbing: scrubbing } = latest.current
+      const { drag: d, duration: dur, isScrubbing: scrubbing, activeReel: curReel } = latest.current
       const box = innerTrackRef.current?.getBoundingClientRect()
-      if (!box) return
+      if (!box || !curReel) return
 
       if (scrubbing) {
         const rawTime = Math.max(0, Math.min(dur, ((e.clientX - box.left) / box.width) * dur))
@@ -206,14 +223,14 @@ export default function Page() {
         return
       }
 
-      if (!d || !activeReel) return
+      if (!d) return
       const delta = ((e.clientX - d.originX) / box.width) * dur
       const min = 0.08
-      const reelDur = activeReel.duration
+      const reelDur = curReel.duration
 
       setReels((prev) =>
         prev.map((r) => {
-          if (r.id !== activeReel.id) return r
+          if (r.id !== curReel.id) return r
 
           if (d.type === 'lyric') {
             return {
@@ -277,7 +294,7 @@ export default function Page() {
       window.removeEventListener('pointerup', stop)
       window.removeEventListener('pointercancel', stop)
     }
-  }, [drag, isScrubbing, activeReel, beatDuration])
+  }, [drag, isScrubbing, beatDuration])
 
   const handleSpill = () => {
     if (!assets.length) return
@@ -404,6 +421,9 @@ export default function Page() {
           <div
             ref={trackAreaRef}
             onPointerDown={(e) => {
+              if (e.target === e.currentTarget) {
+                setSelectedLyricId(null)
+              }
               setIsScrubbing(true)
               setTime(snapToBeat(xToTime(e.clientX)))
             }}
@@ -520,62 +540,99 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Track 3: lyric */}
-                <div className="h-8 bg-black flex items-stretch">
+                {/* Track 3: lyric (Supports Drop to Add, Click to Select, Backspace to Delete) */}
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const text = e.dataTransfer.getData('text/plain')
+                    if (!text || !activeReel) return
+                    const dropTime = snapToBeat(xToTime(e.clientX))
+                    const defaultLen = beatDuration * 4 // span 4 beats by default
+                    const newLyric = {
+                      id: Math.random().toString(36).substring(2, 9),
+                      text,
+                      start: dropTime,
+                      end: +(dropTime + defaultLen).toFixed(3),
+                    }
+
+                    setReels((prev) =>
+                      prev.map((r) => {
+                        if (r.id !== activeReel.id) return r
+                        return {
+                          ...r,
+                          lyrics: [...r.lyrics, newLyric],
+                        }
+                      })
+                    )
+                    setSelectedLyricId(newLyric.id)
+                  }}
+                  className="h-8 bg-black flex items-stretch relative"
+                >
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
-                    {lyrics.map((l) => (
-                      <div
-                        key={l.id}
-                        style={{ left: pct(l.start), width: pct(l.end - l.start) }}
-                        onPointerDown={(e) => {
-                          e.stopPropagation()
-                          if (activeReel) setSelectedId(activeReel.id)
-                          if (!editing) return
-                          setDrag({
-                            id: l.id,
-                            type: 'lyric',
-                            edge: 'move',
-                            originX: e.clientX,
-                            start: l.start,
-                            end: l.end,
-                          })
-                        }}
-                        className={cn(
-                          'absolute inset-y-0 flex items-center overflow-hidden border px-1 z-20',
-                          editing ? 'cursor-grab' : 'cursor-pointer',
-                          activeReel?.id === selectedId && l.id
-                            ? 'border-cream bg-cream/25'
-                            : 'border-white/25 bg-white/10',
-                        )}
-                      >
-                        <span className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-white/85">
-                          {l.text}
-                        </span>
-                        {editing &&
-                          (['left', 'right'] as const).map((edge) => (
-                            <span
-                              key={edge}
-                              role="presentation"
-                              onPointerDown={(e) => {
-                                e.stopPropagation()
-                                if (activeReel) setSelectedId(activeReel.id)
-                                setDrag({
-                                  id: l.id,
-                                  type: 'lyric',
-                                  edge,
-                                  originX: e.clientX,
-                                  start: l.start,
-                                  end: l.end,
-                                })
-                              }}
-                              className={cn(
-                                'absolute inset-y-0 w-1.5 cursor-ew-resize bg-cream/80',
-                                edge === 'left' ? 'left-0' : 'right-0',
-                              )}
-                            />
-                          ))}
-                      </div>
-                    ))}
+                    {lyrics.map((l) => {
+                      const isSelected = selectedLyricId === l.id
+                      return (
+                        <div
+                          key={l.id}
+                          style={{ left: pct(l.start), width: pct(l.end - l.start) }}
+                          onPointerDown={(e) => {
+                            e.stopPropagation()
+                            if (activeReel) setSelectedId(activeReel.id)
+                            setSelectedLyricId(l.id)
+                            if (!editing) return
+                            setDrag({
+                              id: l.id,
+                              type: 'lyric',
+                              edge: 'move',
+                              originX: e.clientX,
+                              start: l.start,
+                              end: l.end,
+                            })
+                          }}
+                          className={cn(
+                            'absolute inset-y-0 flex items-center overflow-hidden border px-1 z-20 transition-colors',
+                            editing ? 'cursor-grab' : 'cursor-pointer',
+                            isSelected
+                              ? 'border-yellow-300/60 bg-yellow-200/25 shadow-[inset_0_0_8px_rgba(253,224,71,0.2)]'
+                              : activeReel?.id === selectedId
+                              ? 'border-cream bg-cream/25'
+                              : 'border-white/25 bg-white/10',
+                          )}
+                        >
+                          <span className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-white/85">
+                            {l.text}
+                          </span>
+                          {editing &&
+                            (['left', 'right'] as const).map((edge) => (
+                              <span
+                                key={edge}
+                                role="presentation"
+                                onPointerDown={(e) => {
+                                  e.stopPropagation()
+                                  if (activeReel) setSelectedId(activeReel.id)
+                                  setSelectedLyricId(l.id)
+                                  setDrag({
+                                    id: l.id,
+                                    type: 'lyric',
+                                    edge,
+                                    originX: e.clientX,
+                                    start: l.start,
+                                    end: l.end,
+                                  })
+                                }}
+                                className={cn(
+                                  'absolute inset-y-0 w-1.5 cursor-ew-resize transition-colors',
+                                  isSelected
+                                    ? 'bg-yellow-300/85 shadow-[0_0_6px_rgba(253,224,71,0.6)]'
+                                    : 'bg-cream/80',
+                                  edge === 'left' ? 'left-0' : 'right-0',
+                                )}
+                              />
+                            ))}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>

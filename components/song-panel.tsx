@@ -3,6 +3,7 @@
 import { useRef } from 'react'
 import type { SongState } from '@/lib/types'
 import { Panel, Field } from '@/components/primitives'
+import { GripVertical } from 'lucide-react'
 
 interface SongPanelProps {
   song: SongState
@@ -19,6 +20,10 @@ function formatDuration(seconds: number): string {
 export function SongPanel({ song, onChange }: SongPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const beatDuration = 60 / (song.bpm || 120)
+
+  const lyricLines = song.lyrics
+    ? song.lyrics.split('\n').map((l) => l.trim()).filter(Boolean)
+    : []
 
   const handleFile = (file: File) => {
     const url = URL.createObjectURL(file)
@@ -109,15 +114,40 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
             </div>
             <div className="flex flex-col gap-1 flex-1 min-h-0">
               <span className="font-mono text-[9px] uppercase tracking-widest text-white/50">
-                LYRICS — {song.lyrics ? song.lyrics.split('\n').filter(Boolean).length : 0} LINES
+                LYRICS — {lyricLines.length} LINES
               </span>
               <textarea
-                rows={3}
+                rows={2}
                 value={song.lyrics}
                 onChange={(e) => onChange({ lyrics: e.target.value })}
                 placeholder="one line per row&#10;the engine weights each line by syllables"
-                className="bg-black border border-border p-3 font-mono text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-cream/60 resize-none flex-1 min-h-0"
+                className="bg-black border border-border p-2 font-mono text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-cream/60 resize-none shrink-0"
               />
+              
+              {/* Draggable individual lyric lines list */}
+              {lyricLines.length > 0 && (
+                <div className="flex flex-col gap-1 flex-1 min-h-0 overflow-y-auto mt-1 pr-1">
+                  <span className="font-mono text-[8px] uppercase tracking-wider text-cream-dim/70">
+                    Drag lines to timeline:
+                  </span>
+                  <div className="flex flex-col gap-1">
+                    {lyricLines.map((line, idx) => (
+                      <div
+                        key={idx}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', line)
+                        }}
+                        className="flex items-center gap-1.5 bg-black border border-border/80 hover:border-yellow-300/50 hover:bg-yellow-200/10 px-2 py-1 cursor-grab active:cursor-grabbing transition-colors"
+                        title="Drag onto lyric timeline track"
+                      >
+                        <GripVertical className="h-3 w-3 text-white/40 shrink-0" />
+                        <span className="font-mono text-[10px] text-white/90 truncate">{line}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
