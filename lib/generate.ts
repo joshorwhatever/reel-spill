@@ -8,11 +8,72 @@ type GenerateOptions = {
   baseName: string
 }
 
+type WhisperSegment = {
+  start: number
+  end: number
+  text: string
+}
+
 function parseLyrics(raw: string): string[] {
   return raw
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
+}
+
+function snapToNearestBeat(timeInSeconds: number, bpm: number): number {
+  const secondsPerBeat = 60 / bpm
+  const beatIndex = Math.round(timeInSeconds / secondsPerBeat)
+  return +(beatIndex * secondsPerBeat).toFixed(3)
+}
+
+export async function alignLyricsWithWhisper(
+  audioFile: File,
+  bpm: number,
+  fallbackLyrics: string,
+  totalBars: number = 16
+): Promise<LyricLine[]> {
+  try {
+    const formData = new FormData()
+    formData.append('file', audioFile)
+
+    const response = await fetch('/api/align-lyrics', {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!response.ok) {
+      throw new Error('Whisper alignment failed')
+    }
+
+    const data = await response.json()
+    const segments: WhisperSegment[] = data.segments || []
+
+    if (!segments.length) {
+      return createBeatGridLyricTimeline(parseLyrics(fallbackLyrics), bpm, totalBars)
+    }
+
+    const secondsPerBeat = 60 / bpm
+    const maxDuration = totalBars * 4 * secondsPerBeat
+
+    return segments
+      .map((seg) => {
+        const snappedStart = snapToNearestBeat(seg.start, bpm)
+        const rawEnd = snapToNearestBeat(seg.end, bpm)
+        const snappedEnd = Math.max(rawEnd, +(snappedStart + secondsPerBeat).toFixed(3))
+
+        return {
+          id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
+          text: seg.text.trim(),
+          start: snappedStart,
+          end: snappedEnd,
+        }
+      })
+      .filter((l) => l.start < maxDuration)
+  } catch (err) {
+    console.warn('Whisper alignment error, using grid fallback:', err)
+    return createBeatGridLyricTimeline(parseLyrics(fallbackLyrics), bpm, totalBars)
+  }
 }
 
 function createBeatGridLyricTimeline(
@@ -23,22 +84,17 @@ function createBeatGridLyricTimeline(
   if (lines.length === 0) return []
 
   const secondsPerBeat = 60 / bpm
-  const beatsPerBar = 4 // Standard 4/4 musical time
+  const beatsPerBar = 4
   const totalBeats = totalBars * beatsPerBar
-
-  // Calculate how many bars each lyric line gets
-  // Round to nearest bar interval so every lyric starts on Beat 1 of a bar
   const barsPerLine = Math.max(1, Math.floor(totalBars / lines.length))
 
   const result: LyricLine[] = []
 
   lines.forEach((text, i) => {
     const startBeat = i * barsPerLine * beatsPerBar
-
-    // Stop if lyrics exceed the 16-bar boundary
     if (startBeat >= totalBeats) return
 
-    const endBeat = Math.min(startBeat + (barsPerLine * beatsPerBar), totalBeats)
+    const endBeat = Math.min(startBeat + barsPerLine * beatsPerBar, totalBeats)
 
     const start = +(startBeat * secondsPerBeat).toFixed(3)
     const end = +(endBeat * secondsPerBeat).toFixed(3)
@@ -64,13 +120,10 @@ function getGridAlignedClips(
   const secondsPerBeat = 60 / bpm
   const beatsPerBar = 4
   const totalBeats = totalBars * beatsPerBar
-  const totalDuration = totalBeats * secondsPerBeat
 
   const clips: ClipItem[] = []
   let currentBeat = 0
-
-  // Cut video clips strictly on 2-bar or 4-bar musical boundaries
-  const barIntervals = [2, 4] 
+  const barIntervals = [2, 4]
 
   while (currentBeat < totalBeats) {
     const asset = assets[Math.floor(Math.random() * assets.length)]
@@ -102,24 +155,28 @@ function getGridAlignedClips(
   return clips
 }
 
-export function generateReels({
+export async function generateReels({
   song,
   assets,
   count,
   baseName,
-}: GenerateOptions): Reel[] {
+}: GenerateOptions): Promise<Reel[]> {
   const bpm = song.bpm || 120
   const totalBars = 16
   const secondsPerBeat = 60 / bpm
   const reelDuration = +(totalBars * 4 * secondsPerBeat).toFixed(3)
 
-  const rawLines = parseLyrics(song.lyrics)
+  let lyrics: LyricLine[] = []
+
+  if (song.file) {
+    lyrics = await alignLyricsWithWhisper(song.file, bpm, song.lyrics, totalBars)
+  } else {
+    lyrics = createBeatGridLyricTimeline(parseLyrics(song.lyrics), bpm, totalBars)
+  }
 
   const reels: Reel[] = []
 
   for (let i = 0; i < count; i++) {
-    // Both lyrics and clips are strictly quantised to musical bar boundaries
-    const lyrics = createBeatGridLyricTimeline(rawLines, bpm, totalBars)
     const clips = getGridAlignedClips(assets, bpm, totalBars)
 
     reels.push({

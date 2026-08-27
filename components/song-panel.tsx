@@ -132,24 +132,22 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
                 <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none p-3 flex flex-col leading-[22px] overflow-hidden">
                   {lyricLines.map((line, idx) => {
                     const text = line.trim()
-                    const hasText = text.length > 0
+                    if (!text) return <div key={idx} className="h-[22px]" />
                     return (
                       <div key={idx} className="h-[22px] flex items-center">
-                        {hasText && (
-                          <div
-                            draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.setData('text/plain', text)
-                            }}
-                            className="pointer-events-auto flex items-center gap-1.5 w-full cursor-grab active:cursor-grabbing text-yellow-300 hover:text-yellow-200 transition-colors group"
-                            title="Drag line to timeline"
-                          >
-                            <GripVertical className="h-3.5 w-3.5 shrink-0" />
-                            <span className="font-mono text-xs text-transparent select-none pointer-events-none truncate">
-                              {text}
-                            </span>
-                          </div>
-                        )}
+                        <div
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', text)
+                          }}
+                          className="pointer-events-auto flex items-center gap-1.5 w-full cursor-grab active:cursor-grabbing text-yellow-300 hover:text-yellow-200 transition-colors group"
+                          title="Drag line to timeline"
+                        >
+                          <GripVertical className="h-3.5 w-3.5 shrink-0" />
+                          <span className="font-mono text-xs text-transparent select-none pointer-events-none truncate">
+                            {text}
+                          </span>
+                        </div>
                       </div>
                     )
                   })}

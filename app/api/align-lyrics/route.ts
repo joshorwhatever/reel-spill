@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
 
 export async function POST(req: Request) {
   try {
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: 'OpenAI API key is missing in environment variables' }, { status: 500 })
+    }
+
     const formData = await req.formData()
     const file = formData.get('file') as File | null
 
@@ -14,12 +14,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Audio file is required' }, { status: 400 })
     }
 
-    const transcription = await openai.audio.transcriptions.create({
-      file,
-      model: 'whisper-1',
-      response_format: 'verbose_json',
-      timestamp_granularities: ['segment', 'word'],
+    // Forward the audio file directly to OpenAI's Whisper API endpoint using fetch
+    const openaiFormData = new FormData()
+    openaiFormData.append('file', file)
+    openaiFormData.append('model', 'whisper-1')
+    openaiFormData.append('response_format', 'verbose_json')
+    openaiFormData.append('timestamp_granularities[]', 'segment')
+    openaiFormData.append('timestamp_granularities[]', 'word')
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: openaiFormData,
     })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`OpenAI API error: ${errText}`)
+    }
+
+    const transcription = await response.json()
 
     return NextResponse.json({
       segments: transcription.segments || [],

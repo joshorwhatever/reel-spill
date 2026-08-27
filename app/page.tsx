@@ -110,6 +110,7 @@ export default function Page() {
   const [modes, setModes] = useState<ReelMode[]>([])
   const [baseName, setBaseName] = useState<string>('')
   const [reelCount, setReelCount] = useState<number>(6)
+  const [isGenerating, setIsGenerating] = useState<boolean>(false)
 
   const [style, setStyle] = useState<CaptionStyle>({
     fontId: GOOGLE_FONTS[0].id,
@@ -335,19 +336,26 @@ export default function Page() {
     }
   }, [drag, isScrubbing, beatDuration])
 
-  const handleSpill = () => {
-    if (!assets.length) return
-    const generated = generateReels({
-      song,
-      assets,
-      count: reelCount,
-      modes,
-      baseName: baseName.trim() || song.name || 'reel',
-    })
-    setReels(generated)
-    if (generated.length > 0) {
-      setSelectedId(generated[0].id)
-      setTime(0)
+  const handleSpill = async () => {
+    if (!assets.length || isGenerating) return
+    setIsGenerating(true)
+    try {
+      const generated = await generateReels({
+        song,
+        assets,
+        count: reelCount,
+        modes,
+        baseName: baseName.trim() || song.name || 'reel',
+      })
+      setReels(generated)
+      if (generated.length > 0) {
+        setSelectedId(generated[0].id)
+        setTime(0)
+      }
+    } catch (err) {
+      console.error('Failed to generate reels:', err)
+    } finally {
+      setIsGenerating(false)
     }
   }
 
