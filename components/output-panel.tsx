@@ -1,7 +1,11 @@
 'use client'
 
+import { useState } from 'react'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
+import { Download } from 'lucide-react'
 import type { Reel, ReelMode } from '@/lib/types'
-import { Panel } from '@/components/primitives'
+import { Panel, Field, Slider } from '@/components/primitives'
 
 export type SpillStatus = 'idle' | 'spilling' | 'completed'
 
@@ -14,6 +18,8 @@ interface OutputPanelProps {
   onToggleMode?: (mode: ReelMode, value: boolean) => void
   baseName?: string
   onChangeBaseName?: (name: string) => void
+  reelCount?: number
+  onChangeReelCount?: (count: number) => void
   status?: SpillStatus
 }
 
@@ -40,8 +46,12 @@ export function OutputPanel({
   onToggleMode,
   baseName = '',
   onChangeBaseName,
+  reelCount = 6,
+  onChangeReelCount,
   status = 'idle',
 }: OutputPanelProps) {
+  const [isExporting, setIsExporting] = useState(false)
+
   const toggle = (m: ReelMode, v: boolean) => {
     if (onToggleMode) {
       onToggleMode(m, v)
@@ -49,6 +59,29 @@ export function OutputPanel({
   }
 
   const displayBase = !baseName || baseName.toLowerCase() === 'reel' ? 'spill' : baseName
+
+  const handleExportZip = async () => {
+    if (!reels || reels.length === 0) return
+    setIsExporting(true)
+
+    try {
+      const zip = new JSZip()
+      const folderName = displayBase
+
+      reels.forEach((reel, index) => {
+        const fileName = `${reel.name || `${folderName}_${index + 1}`}.json`
+        const content = JSON.stringify(reel, null, 2)
+        zip.file(fileName, content)
+      })
+
+      const blob = await zip.generateAsync({ type: 'blob' })
+      saveAs(blob, `${folderName}.zip`)
+    } catch (err) {
+      console.error('Failed to generate export zip:', err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   const renderStatus = () => {
     switch (status) {
@@ -68,7 +101,7 @@ export function OutputPanel({
       title="SPILL"
       meta={<div className="font-mono text-[11px]">{renderStatus()}</div>}
     >
-      <div className="flex flex-col h-full min-h-0 gap-3">
+      <div className="flex flex-col h-full min-h-0 gap-2">
         {/* Naming Convention Input */}
         <div className="relative flex items-center shrink-0">
           <input
@@ -76,24 +109,38 @@ export function OutputPanel({
             value={baseName}
             onChange={(e) => onChangeBaseName?.(e.target.value)}
             placeholder="spill"
-            className="w-full border border-border bg-black py-1.5 pl-2.5 pr-28 font-mono text-xs text-white placeholder-white/20 focus:border-cream/60 focus:outline-none"
+            className="w-full border border-border bg-black py-1 Pl-2.5 pr-28 font-mono text-xs text-white placeholder-white/20 focus:border-cream/60 focus:outline-none"
           />
           <span className="absolute right-2.5 pointer-events-none text-[9px] font-mono text-white/30 truncate max-w-[100px]">
             → {displayBase} 1, {displayBase} 2, ...
           </span>
         </div>
 
+        {/* Count Slider */}
+        <div className="shrink-0">
+          <Field label={`AMOUNT ${reelCount}`}>
+            <Slider
+              aria-label="Reel amount output"
+              value={reelCount}
+              min={1}
+              max={20}
+              step={1}
+              onChange={(v) => onChangeReelCount?.(v)}
+            />
+          </Field>
+        </div>
+
         {/* Reel Types */}
-        <div className="flex flex-col gap-1.5 flex-1 min-h-0">
+        <div className="flex flex-col gap-1 flex-1 min-h-0">
           <div className="flex items-center justify-between shrink-0">
             <span className="text-[9px] font-mono uppercase tracking-widest text-white/40">
               REEL TYPES
             </span>
             <span className="text-[9px] text-white/30 font-mono">
-              (if none chosen engine defaults to virality)
+              (engine defaults to virality)
             </span>
           </div>
-          <div className="grid grid-cols-1 gap-1.5 overflow-y-auto">
+          <div className="grid grid-cols-1 gap-1 overflow-y-auto min-h-0">
             {ALL_MODES.map((m) => {
               const checked = Array.isArray(modes) && modes.includes(m)
               return (
@@ -101,7 +148,7 @@ export function OutputPanel({
                   key={m}
                   type="button"
                   onClick={() => toggle(m, !checked)}
-                  className={`flex items-center justify-between border p-2 text-left font-mono transition cursor-pointer ${
+                  className={`flex items-center justify-between border p-1.5 text-left font-mono transition cursor-pointer ${
                     checked
                       ? 'border-cream/70 bg-cream/10 text-cream'
                       : 'border-border bg-transparent text-cream-dim hover:border-cream/40'
@@ -119,6 +166,21 @@ export function OutputPanel({
             })}
           </div>
         </div>
+
+        {/* Zip Export Action Button */}
+        <button
+          type="button"
+          disabled={reels.length === 0 || isExporting}
+          onClick={handleExportZip}
+          className={`shrink-0 w-full flex items-center justify-center gap-1.5 border py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] transition-colors cursor-pointer ${
+            reels.length > 0 && !isExporting
+              ? 'border-cream/70 bg-cream/10 text-cream hover:bg-cream/20'
+              : 'border-border text-white/20 cursor-not-allowed opacity-50'
+          }`}
+        >
+          <Download className="h-3 w-3" />
+          <span>{isExporting ? 'exporting...' : `export ${displayBase}.zip`}</span>
+        </button>
       </div>
     </Panel>
   )

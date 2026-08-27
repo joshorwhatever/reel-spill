@@ -27,7 +27,6 @@ type Drag = {
   end: number
 }
 
-// Dynamic preview calculation operating against an immutable snapshot array
 function handleTrackDrag<T extends { id: string; start: number; end: number }>(
   items: T[],
   drag: Drag,
@@ -41,7 +40,6 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
   const targetIdx = items.findIndex((item) => item.id === id)
   if (targetIdx === -1) return items
 
-  // Deep clone items from original drag snapshot to preserve original bounds
   const sorted = items.map((item) => ({ ...item })).sort((a, b) => a.start - b.start)
   const target = sorted.find((item) => item.id === id)!
 
@@ -64,10 +62,8 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
 
       if (item.start < target.end && item.end > target.start) {
         if (target.end >= item.end) {
-          // Hidden during drag preview
           return false
         } else {
-          // Non-destructive truncation of start
           item.start = target.end
         }
       }
@@ -85,10 +81,8 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
 
       if (item.end > target.start && item.start < target.end) {
         if (target.start <= item.start) {
-          // Hidden during drag preview
           return false
         } else {
-          // Non-destructive truncation of end
           item.end = target.start
         }
       }
@@ -115,6 +109,7 @@ export default function Page() {
   const [selectedLyricId, setSelectedLyricId] = useState<string | null>(null)
   const [modes, setModes] = useState<ReelMode[]>([])
   const [baseName, setBaseName] = useState<string>('')
+  const [reelCount, setReelCount] = useState<number>(6)
 
   const [style, setStyle] = useState<CaptionStyle>({
     fontId: GOOGLE_FONTS[0].id,
@@ -133,7 +128,6 @@ export default function Page() {
   const [drag, setDrag] = useState<Drag | null>(null)
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false)
 
-  // Initial snapshot ref to allow non-destructive undo while dragging
   const dragSnapshot = useRef<{ clips: any[]; lyrics: any[] } | null>(null)
 
   const trackAreaRef = useRef<HTMLDivElement | null>(null)
@@ -346,7 +340,7 @@ export default function Page() {
     const generated = generateReels({
       song,
       assets,
-      count: 6,
+      count: reelCount,
       modes,
       baseName: baseName.trim() || song.name || 'reel',
     })
@@ -389,14 +383,11 @@ export default function Page() {
 
       <main className="flex flex-1 flex-col overflow-hidden space-y-3">
         <div className="grid flex-1 grid-cols-2 grid-rows-2 gap-3 overflow-hidden">
-          {/* Top-Left: 1. SONG */}
           <SongPanel
             song={song}
             onChange={(patch) => setSong((s) => ({ ...s, ...patch }))}
           />
-          {/* Top-Right: 2. CONTENT */}
           <ContentPanel assets={assets} onChange={setAssets} />
-          {/* Bottom-Left: 3. FONT */}
           <FontPanel
             style={style}
             onChange={(patch) =>
@@ -435,7 +426,6 @@ export default function Page() {
             onUploadFont={(f) => setCustomFonts((prev) => [...prev, f])}
             onSpill={handleSpill}
           />
-          {/* Bottom-Right: 4. SPILL */}
           <OutputPanel
             reels={reels}
             selectedId={activeReel?.id || null}
@@ -445,6 +435,8 @@ export default function Page() {
             onToggleMode={handleToggleMode}
             baseName={baseName}
             onChangeBaseName={setBaseName}
+            reelCount={reelCount}
+            onChangeReelCount={setReelCount}
           />
         </div>
 
@@ -518,7 +510,6 @@ export default function Page() {
                   className="pointer-events-none absolute inset-y-0 w-[2px] -ml-[1px] bg-cream z-40"
                 />
 
-                {/* Track 2: video */}
                 <div className="h-8 bg-black flex items-stretch border-b-2 border-border relative">
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
                     {clips.map((c) => {
@@ -579,7 +570,6 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Track 3: lyric */}
                 <div
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
