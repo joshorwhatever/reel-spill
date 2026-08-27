@@ -16,6 +16,7 @@ import type {
   ReelMode,
   SongState,
   VideoAsset,
+  VideoClip,
 } from '@/lib/types'
 
 type Drag = {
@@ -25,6 +26,75 @@ type Drag = {
   originX: number
   start: number
   end: number
+}
+
+// Precise clip ripple editing: stays anchored to mouse cursor while trimming/removing adjacent clips
+function handleClipDrag(
+  clips: VideoClip[],
+  drag: Drag,
+  delta: number,
+  reelDur: number,
+  snapToBeat: (t: number) => number
+): VideoClip[] {
+  const minLen = 0.08
+  const { id, edge, start: origStart, end: origEnd } = drag
+
+  const targetIdx = clips.findIndex((c) => c.id === id)
+  if (targetIdx === -1) return clips
+
+  const newClips = clips.map((c) => ({ ...c }))
+  const target = newClips[targetIdx]
+
+  if (edge === 'move') {
+    const len = origEnd - origStart
+    const rawStart = Math.max(0, Math.min(reelDur - len, origStart + delta))
+    const start = snapToBeat(rawStart)
+    target.start = +start.toFixed(3)
+    target.end = +(start + len).toFixed(3)
+    return newClips
+  }
+
+  if (edge === 'right') {
+    const rawEnd = Math.min(reelDur, Math.max(origStart + minLen, origEnd + delta))
+    const newEnd = snapToBeat(rawEnd)
+    target.end = +newEnd.toFixed(3)
+
+    return newClips.filter((c) => {
+      if (c.id === id) return true
+      if (c.start >= target.start) {
+        if (c.start < target.end) {
+          if (c.end <= target.end) {
+            return false // Swallowed completely
+          } else {
+            c.start = target.end // Trim start of right neighbor clip
+          }
+        }
+      }
+      return c.end > c.start + 0.001
+    })
+  }
+
+  if (edge === 'left') {
+    const rawStart = Math.max(0, Math.min(origEnd - minLen, origStart + delta))
+    const newStart = snapToBeat(rawStart)
+    target.start = +newStart.toFixed(3)
+
+    return newClips.filter((c) => {
+      if (c.id === id) return true
+      if (c.end <= target.end) {
+        if (c.end > target.start) {
+          if (c.start >= target.start) {
+            return false // Swallowed completely
+          } else {
+            c.end = target.start // Trim end of left neighbor clip
+          }
+        }
+      }
+      return c.end > c.start + 0.001
+    })
+  }
+
+  return newClips
 }
 
 export default function Page() {
@@ -77,7 +147,6 @@ export default function Page() {
     lyrics: [],
   }
 
-  // Extend timeline duration by two extra beat slots to add one more tick and hit the right boundary correctly.
   const baseDuration = hypotheticalReel.duration || 1
   const duration = baseDuration + beatDuration * 2
   const maxDur = activeReel ? activeReel.duration : song.duration || 32
@@ -86,7 +155,6 @@ export default function Page() {
   const lyrics = hypotheticalReel.lyrics || []
   const pct = (t: number) => `${(t / duration) * 100}%`
 
-  // Generate beat markers up to baseDuration + beatDuration so one extra tick is added
   const beats: number[] = []
   for (let t = 0; t <= baseDuration + beatDuration + 0.001; t += beatDuration) {
     beats.push(+t.toFixed(3))
@@ -108,7 +176,6 @@ export default function Page() {
   const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel })
   latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel }
 
-  // Sync song audio play/pause state
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !song.url) return
@@ -119,7 +186,6 @@ export default function Page() {
     }
   }, [isPlaying, song.url])
 
-  // Sync song audio timestamp when scrubbing or jumping time
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !song.url) return
@@ -128,7 +194,6 @@ export default function Page() {
     }
   }, [time, song.url])
 
-  // Automatic looping when reaching max duration
   useEffect(() => {
     if (time >= maxDur && isPlaying) {
       const resetTime = cuePoint !== null ? cuePoint : 0
@@ -139,7 +204,6 @@ export default function Page() {
     }
   }, [time, maxDur, isPlaying, cuePoint])
 
-  // Global Keyboard Shortcuts (Spacebar, Arrow Keys, Backspace/Delete)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
@@ -207,7 +271,6 @@ export default function Page() {
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
   }, [beatDuration, maxDur])
 
-  // Timeline Drag & Scrub Listeners
   useEffect(() => {
     if (!drag && !isScrubbing) return
 
@@ -257,24 +320,7 @@ export default function Page() {
           } else {
             return {
               ...r,
-              clips: r.clips.map((c) => {
-                if (c.id !== d.id) return c
-                if (d.edge === 'move') {
-                  const len = d.end - d.start
-                  const start = snapToBeat(Math.max(0, Math.min(reelDur - len, d.start + delta)))
-                  return {
-                    ...c,
-                    start: +start.toFixed(3),
-                    end: +(start + len).toFixed(3),
-                  }
-                } else if (d.edge === 'left') {
-                  const start = snapToBeat(Math.max(0, Math.min(d.end - min, d.start + delta)))
-                  return { ...c, start: +start.toFixed(3) }
-                } else {
-                  const end = snapToBeat(Math.min(reelDur, Math.max(d.start + min, d.end + delta)))
-                  return { ...c, end: +end.toFixed(3) }
-                }
-              }),
+              clips: handleClipDrag(r.clips, d, delta, reelDur, snapToBeat),
             }
           }
         })
@@ -322,7 +368,6 @@ export default function Page() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground p-3 gap-3">
-      {/* Background Audio Element Driven Directly by Native Audio Events */}
       {song.url && (
         <audio
           ref={audioRef}
@@ -343,9 +388,7 @@ export default function Page() {
         />
       )}
 
-      {/* Workspace Left Panels & Timeline */}
       <main className="flex flex-1 flex-col overflow-hidden space-y-3">
-        {/* 2x2 Grid with exact equal sizing for all 4 panels */}
         <div className="grid flex-1 grid-cols-2 grid-rows-2 gap-3 overflow-hidden">
           <SongPanel
             song={song}
@@ -402,9 +445,7 @@ export default function Page() {
           />
         </div>
 
-        {/* Flush Unified Three-Section Timeline at the Bottom */}
         <div className="w-full bg-black flex m-0 p-0 relative touch-none select-none">
-          {/* Left Column: Row Labels */}
           <div className="flex flex-col shrink-0 cursor-default">
             <div className="flex items-center h-6 bg-black">
               <span className="w-16 font-mono text-[9px] uppercase tracking-widest text-cream-dim">beat</span>
@@ -417,7 +458,6 @@ export default function Page() {
             </div>
           </div>
 
-          {/* Right Column: Shared Track Content Area */}
           <div
             ref={trackAreaRef}
             onPointerDown={(e) => {
@@ -430,7 +470,6 @@ export default function Page() {
             className="flex-1 flex flex-col relative pl-4 pr-0 cursor-pointer"
           >
             <div ref={innerTrackRef} className="relative flex flex-col w-full h-full">
-              {/* Track 1: beat */}
               <div className="flex items-center h-6 bg-black relative">
                 <div className="w-full h-2 bg-transparent relative">
                   {beats.map((b, i) => {
@@ -469,20 +508,19 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* Video & Lyric Wrapper containing the continuous playhead */}
               <div className="relative flex flex-col">
-                {/* Playhead line matched to beat tick thickness */}
                 <div
                   aria-hidden="true"
                   style={{ left: pct(time) }}
-                  className="pointer-events-none absolute inset-y-0 w-[2px] -ml-[1px] bg-cream z-30"
+                  className="pointer-events-none absolute inset-y-0 w-[2px] -ml-[1px] bg-cream z-40"
                 />
 
-                {/* Track 2: video (Draggable, resizable clips with beat snapping) */}
-                <div className="h-8 bg-black flex items-stretch border-b-2 border-border">
+                {/* Track 2: video (Opaque background + Z-Index elevation on drag) */}
+                <div className="h-8 bg-black flex items-stretch border-b-2 border-border relative">
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
                     {clips.map((c) => {
                       const clipAsset = assetMap.get(c.assetId)
+                      const isDraggingThis = drag?.id === c.id
                       return (
                         <div
                           key={c.id}
@@ -501,14 +539,12 @@ export default function Page() {
                             })
                           }}
                           className={cn(
-                            'absolute inset-y-0 flex items-center overflow-hidden border px-1 z-20',
+                            'absolute inset-y-0 flex items-center overflow-hidden border px-1 bg-black',
+                            isDraggingThis ? 'z-30 shadow-lg border-cream' : 'z-20 border-white/40',
                             editing ? 'cursor-grab' : 'cursor-pointer',
-                            time >= c.start && time < c.end
-                              ? 'border-cream bg-cream/35'
-                              : 'border-white/25 bg-white/10',
                           )}
                         >
-                          <span className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-white/85">
+                          <span className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-white/90">
                             {clipAsset?.name || 'Clip'}
                           </span>
                           {editing &&
@@ -529,7 +565,7 @@ export default function Page() {
                                   })
                                 }}
                                 className={cn(
-                                  'absolute inset-y-0 w-1.5 cursor-ew-resize bg-cream/80',
+                                  'absolute inset-y-0 w-1.5 cursor-ew-resize bg-cream/80 hover:bg-cream',
                                   edge === 'left' ? 'left-0' : 'right-0',
                                 )}
                               />
@@ -540,7 +576,7 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Track 3: lyric (Supports Drop to Add, Click to Select, Backspace to Delete) */}
+                {/* Track 3: lyric (Opaque background + Z-Index elevation on drag/select) */}
                 <div
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
@@ -548,7 +584,7 @@ export default function Page() {
                     const text = e.dataTransfer.getData('text/plain')
                     if (!text || !activeReel) return
                     const dropTime = snapToBeat(xToTime(e.clientX))
-                    const defaultLen = beatDuration * 4 // span 4 beats by default
+                    const defaultLen = beatDuration * 4
                     const newLyric = {
                       id: Math.random().toString(36).substring(2, 9),
                       text,
@@ -572,6 +608,7 @@ export default function Page() {
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
                     {lyrics.map((l) => {
                       const isSelected = selectedLyricId === l.id
+                      const isDraggingThis = drag?.id === l.id
                       return (
                         <div
                           key={l.id}
@@ -591,16 +628,15 @@ export default function Page() {
                             })
                           }}
                           className={cn(
-                            'absolute inset-y-0 flex items-center overflow-hidden border px-1 z-20 transition-colors',
+                            'absolute inset-y-0 flex items-center overflow-hidden border px-1 bg-black transition-colors',
+                            isDraggingThis ? 'z-30 shadow-lg' : isSelected ? 'z-25' : 'z-20',
                             editing ? 'cursor-grab' : 'cursor-pointer',
                             isSelected
-                              ? 'border-yellow-300/60 bg-yellow-200/25 shadow-[inset_0_0_8px_rgba(253,224,71,0.2)]'
-                              : activeReel?.id === selectedId
-                              ? 'border-cream bg-cream/25'
-                              : 'border-white/25 bg-white/10',
+                              ? 'border-yellow-300/80 shadow-[inset_0_0_8px_rgba(253,224,71,0.3)]'
+                              : 'border-white/40',
                           )}
                         >
-                          <span className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-white/85">
+                          <span className="truncate font-mono text-[9px] uppercase tracking-[0.1em] text-white/90">
                             {l.text}
                           </span>
                           {editing &&
@@ -624,7 +660,7 @@ export default function Page() {
                                 className={cn(
                                   'absolute inset-y-0 w-1.5 cursor-ew-resize transition-colors',
                                   isSelected
-                                    ? 'bg-yellow-300/85 shadow-[0_0_6px_rgba(253,224,71,0.6)]'
+                                    ? 'bg-yellow-300 shadow-[0_0_6px_rgba(253,224,71,0.6)]'
                                     : 'bg-cream/80',
                                   edge === 'left' ? 'left-0' : 'right-0',
                                 )}
@@ -641,7 +677,6 @@ export default function Page() {
         </div>
       </main>
 
-      {/* Reel Stage Preview */}
       <aside className="relative flex h-full aspect-[9/16] shrink-0 flex-col items-center justify-center bg-transparent">
         <ReelStage
           reels={reels}
