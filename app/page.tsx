@@ -28,7 +28,7 @@ type Drag = {
   end: number
 }
 
-// Precise clip ripple editing: stays anchored to mouse cursor while trimming/removing adjacent clips
+// Active overwrite/trim logic: dragging clip edges dynamically resizes or deletes overtaken neighbor clips
 function handleClipDrag(
   clips: VideoClip[],
   drag: Drag,
@@ -42,8 +42,8 @@ function handleClipDrag(
   const targetIdx = clips.findIndex((c) => c.id === id)
   if (targetIdx === -1) return clips
 
-  const newClips = clips.map((c) => ({ ...c }))
-  const target = newClips[targetIdx]
+  const updatedClips = clips.map((c) => ({ ...c }))
+  const target = updatedClips[targetIdx]
 
   if (edge === 'move') {
     const len = origEnd - origStart
@@ -51,7 +51,7 @@ function handleClipDrag(
     const start = snapToBeat(rawStart)
     target.start = +start.toFixed(3)
     target.end = +(start + len).toFixed(3)
-    return newClips
+    return updatedClips
   }
 
   if (edge === 'right') {
@@ -59,18 +59,20 @@ function handleClipDrag(
     const newEnd = snapToBeat(rawEnd)
     target.end = +newEnd.toFixed(3)
 
-    return newClips.filter((c) => {
+    return updatedClips.filter((c) => {
       if (c.id === id) return true
-      if (c.start >= target.start) {
-        if (c.start < target.end) {
-          if (c.end <= target.end) {
-            return false // Swallowed completely
-          } else {
-            c.start = target.end // Trim start of right neighbor clip
-          }
+
+      // Evaluate neighbor clips to the right
+      if (c.end > target.start) {
+        if (target.end >= c.end) {
+          // Entire clip covered -> Delete
+          return false
+        } else if (target.end > c.start) {
+          // Overlapping clip start -> Truncate start
+          c.start = target.end
         }
       }
-      return c.end > c.start + 0.001
+      return c.end - c.start >= 0.01
     })
   }
 
@@ -79,22 +81,24 @@ function handleClipDrag(
     const newStart = snapToBeat(rawStart)
     target.start = +newStart.toFixed(3)
 
-    return newClips.filter((c) => {
+    return updatedClips.filter((c) => {
       if (c.id === id) return true
-      if (c.end <= target.end) {
-        if (c.end > target.start) {
-          if (c.start >= target.start) {
-            return false // Swallowed completely
-          } else {
-            c.end = target.start // Trim end of left neighbor clip
-          }
+
+      // Evaluate neighbor clips to the left
+      if (c.start < target.end) {
+        if (target.start <= c.start) {
+          // Entire clip covered -> Delete
+          return false
+        } else if (target.start < c.end) {
+          // Overlapping clip end -> Truncate end
+          c.end = target.start
         }
       }
-      return c.end > c.start + 0.001
+      return c.end - c.start >= 0.01
     })
   }
 
-  return newClips
+  return updatedClips
 }
 
 export default function Page() {
@@ -515,7 +519,7 @@ export default function Page() {
                   className="pointer-events-none absolute inset-y-0 w-[2px] -ml-[1px] bg-cream z-40"
                 />
 
-                {/* Track 2: video (Opaque background + Z-Index elevation on drag) */}
+                {/* Track 2: video (Opaque elements with elevated Z-index on active drag) */}
                 <div className="h-8 bg-black flex items-stretch border-b-2 border-border relative">
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
                     {clips.map((c) => {
@@ -576,7 +580,7 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Track 3: lyric (Opaque background + Z-Index elevation on drag/select) */}
+                {/* Track 3: lyric */}
                 <div
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
