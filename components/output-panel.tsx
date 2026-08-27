@@ -21,7 +21,7 @@ interface OutputPanelProps {
   status?: SpillStatus
 }
 
-const ALL_MODES: ReelMode[] = ['cut', 'hook', 'montage']
+const ALL_MODES: ReelMode[] = ['cut', 'montage']
 
 const MODE_LABEL: Record<ReelMode, string> = {
   cut: 'CUT',
@@ -63,7 +63,6 @@ export function OutputPanel({
     setIsExporting(true)
 
     try {
-      // Dynamic CDN load to prevent bundler missing module errors
       const JSZipModule = await import('https://esm.sh/jszip@3.10.1' as any)
       const JSZip = JSZipModule.default || JSZipModule
       const zip = new JSZip()
@@ -146,7 +145,7 @@ export function OutputPanel({
               (engine defaults to virality)
             </span>
           </div>
-          <div className="grid grid-cols-1 gap-1 overflow-y-auto min-h-0">
+          <div className="grid grid-cols-1 gap-1 min-h-0 flex-1">
             {ALL_MODES.map((m) => {
               const checked = Array.isArray(modes) && modes.includes(m)
               return (
@@ -154,7 +153,7 @@ export function OutputPanel({
                   key={m}
                   type="button"
                   onClick={() => toggle(m, !checked)}
-                  className={`flex items-center justify-between border p-1.5 text-left font-mono transition cursor-pointer ${
+                  className={`flex items-center justify-between border p-2 text-left font-mono transition cursor-pointer ${
                     checked
                       ? 'border-cream/70 bg-cream/10 text-cream'
                       : 'border-border bg-transparent text-cream-dim hover:border-cream/40'

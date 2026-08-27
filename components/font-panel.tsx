@@ -226,7 +226,7 @@ export function FontPanel({
             {(
               [
                 ['uppercase', style?.uppercase, 'AA'],
-                ['shadow', style?.shadow, 'shadow'],
+                ['shadow', Boolean(style?.shadow ?? false), 'shadow'],
               ] as const
             ).map(([key, on, label]) => (
               <button
