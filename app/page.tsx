@@ -101,7 +101,7 @@ export default function Page() {
   const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing })
   latest.current = { drag, hypotheticalReel, duration, isScrubbing }
 
-  // Global Keyboard Shortcuts (Spacebar & Arrow Keys) - Allows sliders/buttons, blocks only text inputs
+  // Global Keyboard Shortcuts (Spacebar & Arrow Keys) with capture phase for reliable global handling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
@@ -119,18 +119,21 @@ export default function Page() {
 
       if (e.code === 'Space') {
         e.preventDefault()
+        e.stopPropagation()
         setIsPlaying((prev) => !prev)
       } else if (e.code === 'ArrowRight') {
         e.preventDefault()
+        e.stopPropagation()
         setTime((t) => Math.min(maxDur, +(t + beatDuration).toFixed(3)))
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault()
+        e.stopPropagation()
         setTime((t) => Math.max(0, +(t - beatDuration).toFixed(3)))
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
   }, [beatDuration, activeReel, song.duration])
 
   // Playback Timer Loop (30fps with automatic Reel/TikTok Looping)
@@ -140,7 +143,7 @@ export default function Page() {
     const interval = setInterval(() => {
       setTime((t) => {
         if (t >= maxDur) {
-          return 0 // Loops back to start seamlessly without stopping playback
+          return 0 // Loops back to start seamlessly
         }
         return +(t + 0.033).toFixed(3)
       })
@@ -248,8 +251,38 @@ export default function Page() {
           />
           <FontPanel
             style={style}
-            onChange={(patch) => setStyle((s) => ({ ...s, ...patch }))}
-            onChangeStyle={(patch) => setStyle((s) => ({ ...s, ...patch }))}
+            onChange={(patch) =>
+              setStyle((s) => {
+                const valSize = patch.size !== undefined 
+                  ? Number(typeof patch.size === 'object' && patch.size !== null && 'target' in patch.size ? (patch.size as any).target.value : patch.size) 
+                  : s.size
+                const valTracking = patch.tracking !== undefined 
+                  ? Number(typeof patch.tracking === 'object' && patch.tracking !== null && 'target' in patch.tracking ? (patch.tracking as any).target.value : patch.tracking) 
+                  : s.tracking
+                return {
+                  ...s,
+                  ...patch,
+                  size: isNaN(valSize) ? s.size : valSize,
+                  tracking: isNaN(valTracking) ? s.tracking : valTracking,
+                }
+              })
+            }
+            onChangeStyle={(patch) =>
+              setStyle((s) => {
+                const valSize = patch.size !== undefined 
+                  ? Number(typeof patch.size === 'object' && patch.size !== null && 'target' in patch.size ? (patch.size as any).target.value : patch.size) 
+                  : s.size
+                const valTracking = patch.tracking !== undefined 
+                  ? Number(typeof patch.tracking === 'object' && patch.tracking !== null && 'target' in patch.tracking ? (patch.tracking as any).target.value : patch.tracking) 
+                  : s.tracking
+                return {
+                  ...s,
+                  ...patch,
+                  size: isNaN(valSize) ? s.size : valSize,
+                  tracking: isNaN(valTracking) ? s.tracking : valTracking,
+                }
+              })
+            }
             customFonts={customFonts}
             onUploadFont={(f) => setCustomFonts((prev) => [...prev, f])}
             onSpill={handleSpill}

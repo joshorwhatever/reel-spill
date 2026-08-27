@@ -59,11 +59,13 @@ export function ReelStage({
     return () => observer.disconnect()
   }, [])
 
-  // Safely load Google Fonts stylesheet so canvas can render them instantly
+  // Safely load Google Fonts stylesheet & wait for document.fonts.load to redraw canvas instantly
   useEffect(() => {
     const fontInfo = resolveFont(style.fontId, customFonts)
-    if (fontInfo?.family && !fontInfo.family.startsWith('up-')) {
-      const fontName = fontInfo.name.replace(/\s+/g, '+')
+    const rawFamily = fontInfo?.family || fontInfo?.name || ''
+
+    if (rawFamily && typeof rawFamily === 'string' && !rawFamily.startsWith('up-')) {
+      const fontName = rawFamily.replace(/\s+/g, '+')
       const linkId = `google-font-${style.fontId}`
       if (!document.getElementById(linkId)) {
         const link = document.createElement('link')
@@ -72,6 +74,15 @@ export function ReelStage({
         link.href = `https://fonts.googleapis.com/css2?family=${fontName}:wght@700&display=swap`
         document.head.appendChild(link)
       }
+    }
+
+    if (fontInfo) {
+      const familyName = typeof rawFamily === 'string' ? rawFamily : 'sans-serif'
+      document.fonts.load(`700 16px "${familyName}"`).then(() => {
+        drawCanvasFrame()
+      }).catch(() => {
+        drawCanvasFrame()
+      })
     }
   }, [style.fontId, customFonts])
 
@@ -126,11 +137,19 @@ export function ReelStage({
         ? currentLine.text.toUpperCase()
         : currentLine.text
 
-      // Resolve font family safely and apply to canvas context
+      // Defensively resolve font family with strict type checks to avoid undefined errors
       const fontInfo = resolveFont(style.fontId, customFonts)
-      const fontFamily = fontInfo?.stack || fontInfo?.family || 'sans-serif'
-      const fontSize = style.size * 2.2
+      let rawFamily = fontInfo?.family || fontInfo?.name || 'sans-serif'
+      if (typeof rawFamily !== 'string') rawFamily = 'sans-serif'
 
+      let fontFamily = rawFamily
+      if (!fontFamily.startsWith('up-') && fontFamily.includes(' ') && !fontFamily.startsWith('"')) {
+        fontFamily = `"${fontFamily}", sans-serif`
+      } else if (!fontFamily.startsWith('up-')) {
+        fontFamily = `${fontFamily}, sans-serif`
+      }
+
+      const fontSize = style.size * 2.2
       ctx.font = `700 ${fontSize}px ${fontFamily}`
 
       if ('letterSpacing' in ctx) {
@@ -267,7 +286,7 @@ export function ReelStage({
         style={{ top: `${logoSize.height}px` }}
       />
 
-      {/* 3. Floating ASCII Logo (Pinned directly to top-right origin) */}
+      {/* 3. Floating ASCII Logo */}
       <div
         ref={logoRef}
         className="absolute top-0 right-0 z-30 pointer-events-auto leading-none overflow-hidden pr-0.5"
