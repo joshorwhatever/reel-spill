@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { CaptionStyle, CustomFont, Reel, VideoAsset } from '@/lib/types'
+import { resolveFont } from '@/lib/fonts'
 import { Logo } from '@/components/logo'
 import { ChevronDown } from 'lucide-react'
 
@@ -11,6 +12,7 @@ interface ReelStageProps {
   onSelectReel?: (id: string) => void
   reel: Reel | null
   time: number
+  isPlaying: boolean
   assetMap: Map<string, VideoAsset>
   style: CaptionStyle
   customFonts: CustomFont[]
@@ -23,6 +25,7 @@ export function ReelStage({
   onSelectReel,
   reel,
   time,
+  isPlaying,
   assetMap,
   style,
   customFonts,
@@ -56,18 +59,49 @@ export function ReelStage({
     return () => observer.disconnect()
   }, [])
 
-  // Sync video time offset
+  // Safely load Google Fonts stylesheet so canvas can render them instantly
+  useEffect(() => {
+    const fontInfo = resolveFont(style.fontId, customFonts)
+    if (fontInfo?.family && !fontInfo.family.startsWith('up-')) {
+      const fontName = fontInfo.name.replace(/\s+/g, '+')
+      const linkId = `google-font-${style.fontId}`
+      if (!document.getElementById(linkId)) {
+        const link = document.createElement('link')
+        link.id = linkId
+        link.rel = 'stylesheet'
+        link.href = `https://fonts.googleapis.com/css2?family=${fontName}:wght@700&display=swap`
+        document.head.appendChild(link)
+      }
+    }
+  }, [style.fontId, customFonts])
+
+  // Force video reload when asset changes to avoid black frames
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.load()
+    }
+  }, [asset?.id])
+
+  // Sync video play/pause state and time offset seamlessly
   useEffect(() => {
     if (!videoRef.current || !currentClip || !asset) return
     const video = videoRef.current
     const targetTime = time - currentClip.start + currentClip.offset
 
-    if (Math.abs(video.currentTime - targetTime) > 0.05) {
+    if (isPlaying) {
+      if (video.paused) {
+        video.play().catch(() => {})
+      }
+      if (Math.abs(video.currentTime - targetTime) > 0.3) {
+        video.currentTime = targetTime
+      }
+    } else {
+      video.pause()
       video.currentTime = targetTime
     }
-  }, [time, currentClip, asset])
+  }, [time, isPlaying, currentClip, asset])
 
-  // Canvas frame & lyric text rendering
+  // Canvas frame & lyric text rendering loop reacting to all style changes
   useEffect(() => {
     if (!canvasRef.current || !videoRef.current) return
 
@@ -76,10 +110,12 @@ export function ReelStage({
     const video = videoRef.current
     if (!ctx) return
 
+    let animationId: number
+
     const drawFrame = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-      if (video.readyState >= 2) {
+      if (asset && video.readyState >= 2) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       } else {
         ctx.fillStyle = '#0a0a0a'
@@ -91,8 +127,17 @@ export function ReelStage({
           ? currentLine.text.toUpperCase()
           : currentLine.text
 
+        // Resolve font family safely and apply to canvas context
+        const fontInfo = resolveFont(style.fontId, customFonts)
+        const fontFamily = fontInfo?.stack || fontInfo?.family || 'sans-serif'
         const fontSize = style.size * 2.2
-        ctx.font = `700 ${fontSize}px sans-serif`
+
+        ctx.font = `700 ${fontSize}px ${fontFamily}`
+
+        if ('letterSpacing' in ctx) {
+          ctx.letterSpacing = `${style.tracking || 0}em`
+        }
+
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
 
@@ -109,17 +154,24 @@ export function ReelStage({
           ctx.shadowOffsetY = 4
         } else {
           ctx.shadowColor = 'transparent'
+          ctx.shadowBlur = 0
         }
 
         ctx.fillStyle = '#ffffff'
         ctx.fillText(textToDraw, centerX, centerY)
       }
+
+      if (isPlaying) {
+        animationId = requestAnimationFrame(drawFrame)
+      }
     }
 
     drawFrame()
-    video.addEventListener('seeked', drawFrame)
-    return () => video.removeEventListener('seeked', drawFrame)
-  }, [time, currentClip, currentLine, style])
+
+    return () => {
+      if (animationId) cancelAnimationFrame(animationId)
+    }
+  }, [time, isPlaying, currentClip, currentLine, style, asset, customFonts])
 
   return (
     <div className="relative h-full w-auto aspect-[9/16] bg-black">
