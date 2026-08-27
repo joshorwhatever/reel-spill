@@ -35,6 +35,7 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
       onChange({
         name: file.name,
         url,
+        file,
         duration: audio.duration || 32,
       })
     }
@@ -128,7 +129,6 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
                   className="w-full h-full bg-transparent p-3 pl-8 font-mono text-xs text-white placeholder:text-white/20 focus:outline-none resize-none leading-[22px]"
                 />
 
-                {/* Overlay layer covering full line row width for dragging */}
                 <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none p-3 flex flex-col leading-[22px] overflow-hidden">
                   {lyricLines.map((line, idx) => {
                     const text = line.trim()

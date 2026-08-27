@@ -16,6 +16,7 @@ export type CustomFont = {
 export type SongState = {
   name: string | null
   url: string | null
+  file?: File
   duration: number
   bpm: number
   lyrics: string
@@ -49,7 +50,7 @@ export type AudioTrackItem = {
   id: string
   start: number
   end: number
-  offset: number // allows dragging song further into the video or cutting the beginning
+  offset: number
 }
 
 export type Reel = {
