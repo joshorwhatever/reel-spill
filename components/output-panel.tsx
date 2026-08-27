@@ -21,7 +21,7 @@ interface OutputPanelProps {
   status?: SpillStatus
 }
 
-const ALL_MODES: ReelMode[] = ['cut', 'montage', 'hook']
+const ALL_MODES: ReelMode[] = ['cut', 'montage']
 
 const MODE_LABEL: Record<Exclude<ReelMode, null>, string> = {
   cut: 'CUT',
@@ -30,9 +30,9 @@ const MODE_LABEL: Record<Exclude<ReelMode, null>, string> = {
 }
 
 const MODE_DESC: Record<Exclude<ReelMode, null>, string> = {
-  cut: 'Cuts video when the line changes',
+  cut: 'cuts on line changes',
   hook: 'Bar-based, first 2s focus',
-  montage: 'Cuts video on every beat',
+  montage: 'cuts on every beat',
 }
 
 export function OutputPanel({
