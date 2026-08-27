@@ -123,19 +123,6 @@ export function OutputPanel({
           </span>
         </div>
 
-        <div className="shrink-0">
-          <Field label={`AMOUNT ${reelCount}`}>
-            <Slider
-              aria-label="Reel amount output"
-              value={reelCount}
-              min={1}
-              max={20}
-              step={1}
-              onChange={(v) => onChangeReelCount?.(v)}
-            />
-          </Field>
-        </div>
-
         <div className="flex flex-col gap-1 flex-1 min-h-0">
           <div className="flex items-center justify-between shrink-0">
             <span className="text-[9px] font-mono uppercase tracking-widest text-white/40">
@@ -170,6 +157,19 @@ export function OutputPanel({
               )
             })}
           </div>
+        </div>
+
+        <div className="shrink-0">
+          <Field label={`${reelCount} SPILLS`}>
+            <Slider
+              aria-label="Reel amount output"
+              value={reelCount}
+              min={1}
+              max={20}
+              step={1}
+              onChange={(v) => onChangeReelCount?.(v)}
+            />
+          </Field>
         </div>
 
         <button

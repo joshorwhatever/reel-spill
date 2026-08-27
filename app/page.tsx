@@ -117,7 +117,7 @@ export default function Page() {
     tracking: 0,
     uppercase: false,
     align: 'center',
-    shadow: true,
+    shadow: false,
   })
 
   const [time, setTime] = useState<number>(0)
