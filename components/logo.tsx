@@ -58,12 +58,12 @@ export function Logo({ onClick }: LogoProps) {
       onClick={onClick}
       className="group flex flex-col items-end text-right leading-none transition hover:opacity-80 active:scale-95 focus:outline-none"
     >
-      <div className="mb-1 font-mono text-[9px] uppercase tracking-[0.3em] text-cream drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">
+      <div className="mb-1 font-mono text-[9px] uppercase tracking-[0.3em] text-cream">
         spill reels
       </div>
       <pre
         aria-hidden="true"
-        className="translate-x-[4px] font-mono text-[14px] leading-[1.15] text-cream/70 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] group-hover:text-cream whitespace-pre"
+        className="translate-x-[4px] font-mono text-[14px] leading-[1.15] text-cream/70 group-hover:text-cream whitespace-pre"
       >
         {currentFrame.join('\n')}
       </pre>
