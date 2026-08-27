@@ -21,18 +21,18 @@ interface OutputPanelProps {
   status?: SpillStatus
 }
 
-const ALL_MODES: ReelMode[] = ['cut', 'montage']
+const ALL_MODES: ReelMode[] = ['cut', 'montage', 'hook']
 
-const MODE_LABEL: Record<ReelMode, string> = {
+const MODE_LABEL: Record<Exclude<ReelMode, null>, string> = {
   cut: 'CUT',
   hook: 'HOOK',
   montage: 'MONTAGE',
 }
 
-const MODE_DESC: Record<ReelMode, string> = {
-  cut: '1 beat / cut',
+const MODE_DESC: Record<Exclude<ReelMode, null>, string> = {
+  cut: 'Cuts video when the line changes',
   hook: 'Bar-based, first 2s focus',
-  montage: 'Cuts on line changes',
+  montage: 'Cuts video on every beat',
 }
 
 export function OutputPanel({
@@ -51,7 +51,7 @@ export function OutputPanel({
   const [isExporting, setIsExporting] = useState(false)
 
   const toggle = (m: ReelMode, v: boolean) => {
-    if (onToggleMode) {
+    if (onToggleMode && m) {
       onToggleMode(m, v)
     }
   }
@@ -134,6 +134,7 @@ export function OutputPanel({
           </div>
           <div className="grid grid-cols-1 gap-1 min-h-0 flex-1">
             {ALL_MODES.map((m) => {
+              if (!m) return null
               const checked = Array.isArray(modes) && modes.includes(m)
               return (
                 <button
