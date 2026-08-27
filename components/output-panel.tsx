@@ -1,8 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import JSZip from 'jszip'
-import { saveAs } from 'file-saver'
 import { Download } from 'lucide-react'
 import type { Reel, ReelMode } from '@/lib/types'
 import { Panel, Field, Slider } from '@/components/primitives'
@@ -65,6 +63,9 @@ export function OutputPanel({
     setIsExporting(true)
 
     try {
+      // Dynamic CDN load to prevent bundler missing module errors
+      const JSZipModule = await import('https://esm.sh/jszip@3.10.1' as any)
+      const JSZip = JSZipModule.default || JSZipModule
       const zip = new JSZip()
       const folderName = displayBase
 
@@ -75,7 +76,15 @@ export function OutputPanel({
       })
 
       const blob = await zip.generateAsync({ type: 'blob' })
-      saveAs(blob, `${folderName}.zip`)
+      
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${folderName}.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Failed to generate export zip:', err)
     } finally {
@@ -102,21 +111,19 @@ export function OutputPanel({
       meta={<div className="font-mono text-[11px]">{renderStatus()}</div>}
     >
       <div className="flex flex-col h-full min-h-0 gap-2">
-        {/* Naming Convention Input */}
         <div className="relative flex items-center shrink-0">
           <input
             type="text"
             value={baseName}
             onChange={(e) => onChangeBaseName?.(e.target.value)}
             placeholder="spill"
-            className="w-full border border-border bg-black py-1 Pl-2.5 pr-28 font-mono text-xs text-white placeholder-white/20 focus:border-cream/60 focus:outline-none"
+            className="w-full border border-border bg-black py-1 pl-2.5 pr-28 font-mono text-xs text-white placeholder-white/20 focus:border-cream/60 focus:outline-none"
           />
           <span className="absolute right-2.5 pointer-events-none text-[9px] font-mono text-white/30 truncate max-w-[100px]">
             → {displayBase} 1, {displayBase} 2, ...
           </span>
         </div>
 
-        {/* Count Slider */}
         <div className="shrink-0">
           <Field label={`AMOUNT ${reelCount}`}>
             <Slider
@@ -130,7 +137,6 @@ export function OutputPanel({
           </Field>
         </div>
 
-        {/* Reel Types */}
         <div className="flex flex-col gap-1 flex-1 min-h-0">
           <div className="flex items-center justify-between shrink-0">
             <span className="text-[9px] font-mono uppercase tracking-widest text-white/40">
@@ -167,7 +173,6 @@ export function OutputPanel({
           </div>
         </div>
 
-        {/* Zip Export Action Button */}
         <button
           type="button"
           disabled={reels.length === 0 || isExporting}
@@ -179,7 +184,7 @@ export function OutputPanel({
           }`}
         >
           <Download className="h-3 w-3" />
-          <span>{isExporting ? 'exporting...' : `export ${displayBase}.zip`}</span>
+          <span>{isExporting ? 'exporting...' : `${displayBase}.zip`}</span>
         </button>
       </div>
     </Panel>
