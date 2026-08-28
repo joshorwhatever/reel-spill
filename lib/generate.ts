@@ -14,11 +14,21 @@ type WhisperSegment = {
   text: string
 }
 
+type WhisperWord = {
+  word: string
+  start: number
+  end: number
+}
+
 function parseLyrics(raw: string): string[] {
   return raw
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
+}
+
+function cleanText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
 export async function alignLyricsWithWhisper(
@@ -47,57 +57,105 @@ export async function alignLyricsWithWhisper(
 
     const data = await response.json()
     const segments: WhisperSegment[] = data.segments || []
-
-    if (!segments.length) {
-      return createBeatGridLyricTimeline(parsedLines, bpm, totalBars)
-    }
+    const words: WhisperWord[] = data.words || []
 
     const secondsPerBeat = 60 / bpm
     const maxDuration = totalBars * 4 * secondsPerBeat
 
-    // Map formatted user lyric lines directly to Whisper's exact speech timestamps
-    if (parsedLines.length > 0) {
-      const lyricCount = parsedLines.length
-      const segCount = segments.length
+    // 1. Precise Word-Level Alignment: Match each line's first and last word timestamps
+    if (parsedLines.length > 0 && words.length > 0) {
+      let wordPointer = 0
+      const alignedLines: LyricLine[] = []
 
-      return parsedLines
-        .map((lineText, idx) => {
-          const segIndexStart = Math.floor((idx / lyricCount) * segCount)
-          const segIndexEnd = Math.min(
-            segCount - 1,
-            Math.max(segIndexStart, Math.floor(((idx + 1) / lyricCount) * segCount) - 1)
-          )
+      for (let i = 0; i < parsedLines.length; i++) {
+        const lineText = parsedLines[i]
+        const lineTokens = lineText.split(/\s+/).map(cleanText).filter(Boolean)
 
-          const actualSegStart = segments[segIndexStart]
-          const actualSegEnd = segments[segIndexEnd]
+        if (lineTokens.length === 0) continue
 
-          const start = +Math.max(0, actualSegStart.start).toFixed(3)
-          const end = +Math.max(start + 0.05, actualSegEnd.end).toFixed(3)
+        let lineStart = -1
+        let lineEnd = -1
+        let matchedCount = 0
 
-          return {
+        for (let j = wordPointer; j < words.length; j++) {
+          const w = words[j]
+          const cleanedW = cleanText(w.word)
+
+          if (!cleanedW) continue
+
+          if (lineTokens.includes(cleanedW)) {
+            if (lineStart === -1) {
+              lineStart = w.start
+            }
+            lineEnd = w.end
+            wordPointer = j + 1
+            matchedCount++
+
+            if (matchedCount >= Math.min(2, lineTokens.length)) {
+              // Found match context for this line
+              if (j + lineTokens.length - matchedCount < words.length) {
+                const targetIdx = Math.min(words.length - 1, j + (lineTokens.length - matchedCount))
+                lineEnd = words[targetIdx].end
+                wordPointer = targetIdx + 1
+              }
+              break
+            }
+          }
+        }
+
+        if (lineStart !== -1 && lineEnd !== -1) {
+          alignedLines.push({
             id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
             text: lineText,
-            start,
-            end,
-          }
-        })
+            start: +Math.max(0, lineStart).toFixed(3),
+            end: +Math.max(lineStart + 0.1, lineEnd).toFixed(3),
+          })
+        }
+      }
+
+      if (alignedLines.length > 0) {
+        return alignedLines.filter((l) => l.start < maxDuration)
+      }
+    }
+
+    // 2. Segment Fallback: Direct segment speech timestamps
+    if (segments.length > 0) {
+      if (parsedLines.length > 0) {
+        const lyricCount = parsedLines.length
+        const segCount = segments.length
+
+        return parsedLines
+          .map((lineText, idx) => {
+            const segStartIdx = Math.floor((idx / lyricCount) * segCount)
+            const segEndIdx = Math.min(
+              segCount - 1,
+              Math.max(segStartIdx, Math.floor(((idx + 1) / lyricCount) * segCount) - 1)
+            )
+
+            const start = +Math.max(0, segments[segStartIdx].start).toFixed(3)
+            const end = +Math.max(start + 0.1, segments[segEndIdx].end).toFixed(3)
+
+            return {
+              id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
+              text: lineText,
+              start,
+              end,
+            }
+          })
+          .filter((l) => l.start < maxDuration)
+      }
+
+      return segments
+        .map((seg) => ({
+          id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
+          text: seg.text.trim(),
+          start: +Math.max(0, seg.start).toFixed(3),
+          end: +Math.max(seg.start + 0.1, seg.end).toFixed(3),
+        }))
         .filter((l) => l.start < maxDuration)
     }
 
-    // Fallback: Use raw Whisper transcription segments if no lyrics supplied
-    return segments
-      .map((seg) => {
-        const start = +Math.max(0, seg.start).toFixed(3)
-        const end = +Math.max(start + 0.05, seg.end).toFixed(3)
-
-        return {
-          id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
-          text: seg.text.trim(),
-          start,
-          end,
-        }
-      })
-      .filter((l) => l.start < maxDuration)
+    return createBeatGridLyricTimeline(parsedLines, bpm, totalBars)
   } catch (err) {
     console.warn('Whisper alignment error, using grid fallback:', err)
     return createBeatGridLyricTimeline(parsedLines, bpm, totalBars)

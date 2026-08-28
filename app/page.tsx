@@ -348,13 +348,31 @@ export default function Page() {
   const handleSpill = async () => {
     if (!assets.length || isGenerating) return
     setIsGenerating(true)
+    
     try {
+      // Deep copy to mutate safely
+      let safeSong = { ...song }
+
+      // Safeguard: Reconstruct the File object if state wiped it but kept the URL
+      if (!safeSong.file && safeSong.url) {
+        try {
+          const res = await fetch(safeSong.url)
+          const blob = await res.blob()
+          safeSong.file = new File([blob], safeSong.name || 'audio.mp3', { 
+            type: blob.type || 'audio/mpeg' 
+          })
+          console.log('Successfully reconstructed File from URL for Whisper')
+        } catch (err) {
+          console.warn('Failed to reconstruct File from blob URL:', err)
+        }
+      }
+
       const generated = await generateReels({
-        song,
+        song: safeSong,
         assets,
         count: reelCount,
         modes,
-        baseName: baseName.trim() || song.name || 'reel',
+        baseName: baseName.trim() || safeSong.name || 'reel',
       })
       setReels(generated)
       if (generated.length > 0) {

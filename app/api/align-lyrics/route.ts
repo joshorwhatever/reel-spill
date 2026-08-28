@@ -9,18 +9,21 @@ export async function POST(req: Request) {
 
     const formData = await req.formData()
     const file = formData.get('file') as File | null
+    const prompt = formData.get('prompt') as string | null
 
     if (!file) {
       return NextResponse.json({ error: 'Audio file is required' }, { status: 400 })
     }
 
-    // Forward the audio file directly to OpenAI's Whisper API endpoint using fetch
     const openaiFormData = new FormData()
     openaiFormData.append('file', file)
     openaiFormData.append('model', 'whisper-1')
     openaiFormData.append('response_format', 'verbose_json')
     openaiFormData.append('timestamp_granularities[]', 'segment')
     openaiFormData.append('timestamp_granularities[]', 'word')
+    if (prompt) {
+      openaiFormData.append('prompt', prompt)
+    }
 
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
