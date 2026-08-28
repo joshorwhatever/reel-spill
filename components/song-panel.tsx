@@ -3,11 +3,12 @@
 import { useRef, useState } from 'react'
 import type { SongState } from '@/lib/types'
 import { Panel, Field } from '@/components/primitives'
-import { GripVertical, Edit3, Check } from 'lucide-react'
+import { GripVertical, Edit3, Check, Wand2 } from 'lucide-react'
 
 interface SongPanelProps {
   song: SongState
   onChange: (patch: Partial<SongState>) => void
+  onLyricsAligned?: (alignedLyrics: Array<{ text: string; start: number; end: number }>) => void
 }
 
 function formatDuration(seconds: number): string {
@@ -17,13 +18,53 @@ function formatDuration(seconds: number): string {
   return `${mins}m${secs.toString().padStart(2, '0')}s`
 }
 
-export function SongPanel({ song, onChange }: SongPanelProps) {
+// Whisper auto-alignment: Speech timestamps override all default beat/bar rules
+async function alignLyricsWithWhisper(file: File, lyricLines: string[]) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('model', 'whisper-1')
+  formData.append('response_format', 'verbose_json')
+  formData.append('timestamp_granularities[]', 'segment')
+  
+  // Provide full lyrics and structural scale guidance (16 bars / 2 verses) to anchor Whisper
+  const promptContext = `Target arrangement: 16 bars across 2 verses. Exact lyrics guide:\n${lyricLines.join('\n')}`
+  formData.append('prompt', promptContext)
+
+  const response = await fetch('/api/whisper-align', {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    throw new Error('Whisper alignment API request failed')
+  }
+
+  const data = await response.json()
+  const segments: Array<{ text: string; start: number; end: number }> = data.segments || []
+
+  // Map each lyric line strictly to when the audio segment starts and stops being spoken
+  return lyricLines.map((line, index) => {
+    const matchingSegment = segments[index]
+    if (matchingSegment) {
+      return {
+        text: line,
+        start: matchingSegment.start,
+        end: matchingSegment.end,
+      }
+    }
+    // Fallback placement if segments run short
+    const fallbackStart = index * 4
+    return { text: line, start: fallbackStart, end: fallbackStart + 3.5 }
+  })
+}
+
+export function SongPanel({ song, onChange, onLyricsAligned }: SongPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [isBulkEditing, setIsBulkEditing] = useState<boolean>(!song.lyrics)
+  const [isAligning, setIsAligning] = useState(false)
   const beatDuration = 60 / (song.bpm || 120)
 
-  // Filter out blank/empty lines for draggable mode
   const rawLines = song.lyrics ? song.lyrics.split('\n') : []
   const lyricLines = rawLines.filter((line) => line.trim().length > 0)
 
@@ -38,6 +79,21 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
         file,
         duration: audio.duration || 32,
       })
+    }
+  }
+
+  const handleAlignWhisper = async () => {
+    if (!song.file || lyricLines.length === 0) return
+    setIsAligning(true)
+    try {
+      const aligned = await alignLyricsWithWhisper(song.file, lyricLines)
+      if (onLyricsAligned) {
+        onLyricsAligned(aligned)
+      }
+    } catch (err) {
+      console.error('Whisper alignment error:', err)
+    } finally {
+      setIsAligning(false)
     }
   }
 
@@ -109,7 +165,7 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
                   type="number"
                   value={song.bpm}
                   onChange={(e) => onChange({ bpm: Number(e.target.value) })}
-                  className="bg-black border border-border px-3 py-2 font-mono text-xs text-white focus:outline-none focus:border-cream/60"
+                  className="w-full bg-black border border-border px-3 py-2 font-mono text-xs text-white focus:outline-none focus:border-cream/60"
                 />
               </Field>
               <Field label="BEAT">
@@ -127,21 +183,34 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
                 <span className="font-mono text-[9px] uppercase tracking-widest text-white/50">
                   LYRICS — {lyricLines.length} LINES
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setIsBulkEditing(!isBulkEditing)}
-                  className="font-mono text-[9px] uppercase tracking-widest text-yellow-300 hover:text-yellow-200 flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  {isBulkEditing ? (
-                    <>
-                      <Check className="h-2.5 w-2.5" /> Done
-                    </>
-                  ) : (
-                    <>
-                      <Edit3 className="h-2.5 w-2.5" /> Edit Raw Text
-                    </>
+                <div className="flex items-center gap-3">
+                  {song.file && lyricLines.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAlignWhisper}
+                      disabled={isAligning}
+                      className="font-mono text-[9px] uppercase tracking-widest text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                    >
+                      <Wand2 className={`h-2.5 w-2.5 ${isAligning ? 'animate-spin' : ''}`} />
+                      {isAligning ? 'Aligning...' : 'Whisper Sync'}
+                    </button>
                   )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkEditing(!isBulkEditing)}
+                    className="font-mono text-[9px] uppercase tracking-widest text-yellow-300 hover:text-yellow-200 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    {isBulkEditing ? (
+                      <>
+                        <Check className="h-2.5 w-2.5" /> Done
+                      </>
+                    ) : (
+                      <>
+                        <Edit3 className="h-2.5 w-2.5" /> Edit Raw Text
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div className="relative flex-1 min-h-0 border border-border bg-black focus-within:border-cream/60 overflow-hidden">
