@@ -32,7 +32,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
   drag: Drag,
   delta: number,
   reelDur: number,
-  snapToBeat: (t: number) => number
+  snapToTick: (t: number) => number
 ): T[] {
   const minLen = 0.08
   const { id, edge, start: origStart, end: origEnd } = drag
@@ -46,7 +46,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
   if (edge === 'move') {
     const len = origEnd - origStart
     const rawStart = Math.max(0, Math.min(reelDur - len, origStart + delta))
-    const start = snapToBeat(rawStart)
+    const start = snapToTick(rawStart)
     target.start = +start.toFixed(3)
     target.end = +(start + len).toFixed(3)
     return sorted
@@ -54,7 +54,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
 
   if (edge === 'right') {
     const rawEnd = Math.min(reelDur, Math.max(origStart + minLen, origEnd + delta))
-    const newEnd = snapToBeat(rawEnd)
+    const newEnd = snapToTick(rawEnd)
     target.end = +newEnd.toFixed(3)
 
     return sorted.filter((item) => {
@@ -73,7 +73,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
 
   if (edge === 'left') {
     const rawStart = Math.max(0, Math.min(origEnd - minLen, origStart + delta))
-    const newStart = snapToBeat(rawStart)
+    const newStart = snapToTick(rawStart)
     target.start = +newStart.toFixed(3)
 
     return sorted.filter((item) => {
@@ -131,7 +131,6 @@ export default function Page() {
 
   const dragSnapshot = useRef<{ clips: any[]; lyrics: any[] } | null>(null)
 
-  const trackAreaRef = useRef<HTMLDivElement | null>(null)
   const innerTrackRef = useRef<HTMLDivElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -155,15 +154,21 @@ export default function Page() {
   const lyrics = hypotheticalReel.lyrics || []
   const pct = (t: number) => `${(t / duration) * 100}%`
 
-  const beats: number[] = []
-  for (let t = 0; t <= baseDuration + beatDuration + 0.001; t += beatDuration) {
-    beats.push(+t.toFixed(3))
+  const markerInterval = beatDuration * 2
+  const visualMarkers: { time: number; isPrimary: boolean }[] = []
+  
+  for (let t = 0; t <= baseDuration + 0.001; t += markerInterval) {
+    const idx = Math.round(t / markerInterval)
+    visualMarkers.push({
+      time: +t.toFixed(3),
+      isPrimary: idx % 2 === 0,
+    })
   }
 
-  const snapToBeat = (t: number) => {
-    if (!beatDuration) return t
-    const idx = Math.round(t / beatDuration)
-    return +(idx * beatDuration).toFixed(3)
+  const snapToTick = (t: number) => {
+    if (!markerInterval) return t
+    const idx = Math.round(t / markerInterval)
+    return +(idx * markerInterval).toFixed(3)
   }
 
   function xToTime(clientX: number) {
@@ -173,8 +178,8 @@ export default function Page() {
     return (x / box.width) * duration
   }
 
-  const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel })
-  latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel }
+  const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel, maxDur })
+  latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel, maxDur }
 
   const startDragging = (dragInfo: Drag) => {
     if (activeReel) {
@@ -253,11 +258,11 @@ export default function Page() {
       } else if (e.code === 'ArrowRight') {
         e.preventDefault()
         e.stopPropagation()
-        setTime((t) => Math.min(maxDur, +(t + beatDuration).toFixed(3)))
+        setTime((t) => Math.min(maxDur, +(t + markerInterval).toFixed(3)))
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault()
         e.stopPropagation()
-        setTime((t) => Math.max(0, +(t - beatDuration).toFixed(3)))
+        setTime((t) => Math.max(0, +(t - markerInterval).toFixed(3)))
       } else if (e.code === 'Backspace' || e.code === 'Delete') {
         const { selectedLyricId: selLyric, activeReel: curReel } = latest.current
         if (selLyric && curReel) {
@@ -279,23 +284,27 @@ export default function Page() {
 
     window.addEventListener('keydown', handleKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [beatDuration, maxDur])
+  }, [markerInterval, maxDur])
 
   useEffect(() => {
     if (!drag && !isScrubbing) return
 
     const move = (e: PointerEvent) => {
-      const { drag: d, duration: dur, isScrubbing: scrubbing, activeReel: curReel } = latest.current
+      const { drag: d, duration: dur, isScrubbing: scrubbing, activeReel: curReel, maxDur: maxD } = latest.current
       const box = innerTrackRef.current?.getBoundingClientRect()
-      if (!box || !curReel) return
+      if (!box) return
 
       if (scrubbing) {
-        const rawTime = Math.max(0, Math.min(dur, ((e.clientX - box.left) / box.width) * dur))
-        const newTime = snapToBeat(rawTime)
+        const rawTime = Math.max(0, Math.min(maxD, ((e.clientX - box.left) / box.width) * dur))
+        const newTime = snapToTick(rawTime)
         setTime(+newTime.toFixed(3))
+        if (audioRef.current) {
+          audioRef.current.currentTime = +newTime.toFixed(3)
+        }
         return
       }
 
+      if (!curReel) return
       const currentSnapshot = dragSnapshot.current
       if (!d || !currentSnapshot) return
       const delta = ((e.clientX - d.originX) / box.width) * dur
@@ -308,12 +317,12 @@ export default function Page() {
           if (d.type === 'lyric') {
             return {
               ...r,
-              lyrics: handleTrackDrag(currentSnapshot.lyrics || [], d, delta, reelDur, snapToBeat),
+              lyrics: handleTrackDrag(currentSnapshot.lyrics || [], d, delta, reelDur, snapToTick),
             }
           } else {
             return {
               ...r,
-              clips: handleTrackDrag(currentSnapshot.clips || [], d, delta, reelDur, snapToBeat),
+              clips: handleTrackDrag(currentSnapshot.clips || [], d, delta, reelDur, snapToTick),
             }
           }
         })
@@ -334,7 +343,7 @@ export default function Page() {
       window.removeEventListener('pointerup', stop)
       window.removeEventListener('pointercancel', stop)
     }
-  }, [drag, isScrubbing, beatDuration])
+  }, [drag, isScrubbing, markerInterval])
 
   const handleSpill = async () => {
     if (!assets.length || isGenerating) return
@@ -367,6 +376,15 @@ export default function Page() {
     }
   }
 
+  const handleStartScrub = (clientX: number) => {
+    setIsScrubbing(true)
+    const newTime = snapToTick(xToTime(clientX))
+    setTime(newTime)
+    if (audioRef.current) {
+      audioRef.current.currentTime = newTime
+    }
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground p-3 gap-3">
       {song.url && (
@@ -375,7 +393,7 @@ export default function Page() {
           src={song.url}
           preload="auto"
           onTimeUpdate={(e) => {
-            if (isPlaying) {
+            if (isPlaying && !isScrubbing) {
               setTime(e.currentTarget.currentTime)
             }
           }}
@@ -462,22 +480,26 @@ export default function Page() {
           </div>
 
           <div
-            ref={trackAreaRef}
             onPointerDown={(e) => {
-              if (e.target === e.currentTarget) {
-                setSelectedLyricId(null)
-              }
-              setIsScrubbing(true)
-              setTime(snapToBeat(xToTime(e.clientX)))
+              setSelectedLyricId(null)
+              handleStartScrub(e.clientX)
             }}
             className="flex-1 flex flex-col relative pl-4 pr-0 cursor-pointer"
           >
             <div ref={innerTrackRef} className="relative flex flex-col w-full h-full">
-              <div className="flex items-center h-6 bg-black relative">
+              <div 
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  handleStartScrub(e.clientX)
+                }}
+                className="flex items-center h-6 bg-black relative cursor-pointer"
+              >
                 <div className="w-full h-2 bg-transparent relative">
-                  {beats.map((b, i) => {
+                  {visualMarkers.map((m, i) => {
+                    const b = m.time
                     const isCue = cuePoint === b
-                    const isActive = time >= b && time < b + beatDuration
+                    // Strict single-tick active highlight
+                    const isActive = Math.abs(time - b) < 0.001
                     return (
                       <div
                         key={i}
@@ -485,10 +507,7 @@ export default function Page() {
                         onPointerDown={(e) => {
                           e.stopPropagation()
                           setCuePoint(b)
-                          setTime(b)
-                          if (audioRef.current) {
-                            audioRef.current.currentTime = b
-                          }
+                          handleStartScrub(e.clientX)
                         }}
                         className={cn(
                           'absolute top-0 bottom-0 w-[12px] -ml-[6px] cursor-pointer z-10 flex items-center justify-center group',
@@ -497,7 +516,8 @@ export default function Page() {
                       >
                         <div
                           className={cn(
-                            'h-full transition-all rounded-xs',
+                            'transition-all rounded-xs',
+                            m.isPrimary ? 'h-full' : 'h-[50%]',
                             isCue
                               ? 'w-[4px] bg-yellow-200/80 border border-yellow-300/60 shadow-[0_0_8px_rgba(253,224,71,0.4)]'
                               : isActive
@@ -513,12 +533,16 @@ export default function Page() {
 
               <div className="relative flex flex-col">
                 <div
-                  aria-hidden="true"
                   style={{ left: pct(time) }}
-                  className="pointer-events-none absolute inset-y-0 w-[2px] -ml-[1px] bg-cream z-40"
+                  className="absolute inset-y-0 -ml-[1px] w-[2px] bg-cream z-40 pointer-events-none shadow-[0_0_6px_rgba(255,255,255,0.6)]"
                 />
 
-                <div className="h-8 bg-black flex items-stretch border-b-2 border-border relative">
+                <div 
+                  onPointerDown={(e) => {
+                    handleStartScrub(e.clientX)
+                  }}
+                  className="h-8 bg-black flex items-stretch border-b-2 border-border relative cursor-pointer"
+                >
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
                     {clips.map((c) => {
                       const clipAsset = assetMap.get(c.assetId)
@@ -579,13 +603,16 @@ export default function Page() {
                 </div>
 
                 <div
+                  onPointerDown={(e) => {
+                    handleStartScrub(e.clientX)
+                  }}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault()
                     const text = e.dataTransfer.getData('text/plain')
                     if (!text || !activeReel) return
-                    const dropTime = snapToBeat(xToTime(e.clientX))
-                    const defaultLen = beatDuration * 4
+                    const dropTime = snapToTick(xToTime(e.clientX))
+                    const defaultLen = markerInterval * 2
                     const newLyric = {
                       id: Math.random().toString(36).substring(2, 9),
                       text,
@@ -604,7 +631,7 @@ export default function Page() {
                     )
                     setSelectedLyricId(newLyric.id)
                   }}
-                  className="h-8 bg-black flex items-stretch relative"
+                  className="h-8 bg-black flex items-stretch relative cursor-pointer"
                 >
                   <div className="w-full h-full bg-transparent relative overflow-hidden">
                     {lyrics.map((l) => {

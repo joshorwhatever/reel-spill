@@ -27,9 +27,14 @@ export async function alignLyricsWithWhisper(
   fallbackLyrics: string,
   totalBars: number = 16
 ): Promise<LyricLine[]> {
+  const parsedLines = parseLyrics(fallbackLyrics)
+
   try {
     const formData = new FormData()
     formData.append('file', audioFile)
+    if (fallbackLyrics) {
+      formData.append('prompt', fallbackLyrics)
+    }
 
     const response = await fetch('/api/align-lyrics', {
       method: 'POST',
@@ -44,15 +49,44 @@ export async function alignLyricsWithWhisper(
     const segments: WhisperSegment[] = data.segments || []
 
     if (!segments.length) {
-      return createBeatGridLyricTimeline(parseLyrics(fallbackLyrics), bpm, totalBars)
+      return createBeatGridLyricTimeline(parsedLines, bpm, totalBars)
     }
 
     const secondsPerBeat = 60 / bpm
     const maxDuration = totalBars * 4 * secondsPerBeat
 
+    // Map formatted user lyric lines directly to Whisper's exact speech timestamps
+    if (parsedLines.length > 0) {
+      const lyricCount = parsedLines.length
+      const segCount = segments.length
+
+      return parsedLines
+        .map((lineText, idx) => {
+          const segIndexStart = Math.floor((idx / lyricCount) * segCount)
+          const segIndexEnd = Math.min(
+            segCount - 1,
+            Math.max(segIndexStart, Math.floor(((idx + 1) / lyricCount) * segCount) - 1)
+          )
+
+          const actualSegStart = segments[segIndexStart]
+          const actualSegEnd = segments[segIndexEnd]
+
+          const start = +Math.max(0, actualSegStart.start).toFixed(3)
+          const end = +Math.max(start + 0.05, actualSegEnd.end).toFixed(3)
+
+          return {
+            id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
+            text: lineText,
+            start,
+            end,
+          }
+        })
+        .filter((l) => l.start < maxDuration)
+    }
+
+    // Fallback: Use raw Whisper transcription segments if no lyrics supplied
     return segments
       .map((seg) => {
-        // Exact spoken duration: no artificial padding before or after
         const start = +Math.max(0, seg.start).toFixed(3)
         const end = +Math.max(start + 0.05, seg.end).toFixed(3)
 
@@ -66,7 +100,7 @@ export async function alignLyricsWithWhisper(
       .filter((l) => l.start < maxDuration)
   } catch (err) {
     console.warn('Whisper alignment error, using grid fallback:', err)
-    return createBeatGridLyricTimeline(parseLyrics(fallbackLyrics), bpm, totalBars)
+    return createBeatGridLyricTimeline(parsedLines, bpm, totalBars)
   }
 }
 
@@ -118,7 +152,6 @@ function getClipsForMode(
   const totalBeats = totalBars * beatsPerBar
   const totalDuration = totalBeats * secondsPerBeat
 
-  // MONTAGE -> cuts video on every beat
   if (modes.includes('montage')) {
     const clips: ClipItem[] = []
     let currentBeat = 0
@@ -150,7 +183,6 @@ function getClipsForMode(
     return clips
   }
 
-  // CUT -> changes video when the line changes (syncs clips to lyric lines)
   if (modes.includes('cut') && lyrics.length > 0) {
     const clips: ClipItem[] = []
     let currentTime = 0
@@ -208,7 +240,6 @@ function getClipsForMode(
     return clips
   }
 
-  // Default / Hook mode: Grid aligned clips (2 or 4 bar intervals)
   const clips: ClipItem[] = []
   let currentBeat = 0
   const barIntervals = [2, 4]

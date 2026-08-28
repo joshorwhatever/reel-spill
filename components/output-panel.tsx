@@ -161,7 +161,7 @@ export function OutputPanel({
         </div>
 
         <div className="shrink-0">
-          <Field label={`${reelCount} SPILLS`}>
+          <Field label={`${reelCount} ${reelCount === 1 ? 'SPILL' : 'SPILLS'}`}>
             <Slider
               aria-label="Reel amount output"
               value={reelCount}

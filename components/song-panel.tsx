@@ -1,9 +1,9 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { SongState } from '@/lib/types'
 import { Panel, Field } from '@/components/primitives'
-import { GripVertical } from 'lucide-react'
+import { GripVertical, Edit3, Check } from 'lucide-react'
 
 interface SongPanelProps {
   song: SongState
@@ -19,13 +19,13 @@ function formatDuration(seconds: number): string {
 
 export function SongPanel({ song, onChange }: SongPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [isBulkEditing, setIsBulkEditing] = useState<boolean>(!song.lyrics)
   const beatDuration = 60 / (song.bpm || 120)
 
-  const lyricLines = song.lyrics
-    ? song.lyrics.split('\n')
-    : []
-
-  const validLinesCount = lyricLines.filter((l) => l.trim()).length
+  // Filter out blank/empty lines for draggable mode
+  const rawLines = song.lyrics ? song.lyrics.split('\n') : []
+  const lyricLines = rawLines.filter((line) => line.trim().length > 0)
 
   const handleFile = (file: File) => {
     const url = URL.createObjectURL(file)
@@ -39,6 +39,12 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
         duration: audio.duration || 32,
       })
     }
+  }
+
+  const updateLineText = (idx: number, newText: string) => {
+    const nextLines = [...lyricLines]
+    nextLines[idx] = newText
+    onChange({ lyrics: nextLines.join('\n') })
   }
 
   return (
@@ -115,43 +121,81 @@ export function SongPanel({ song, onChange }: SongPanelProps) {
                 />
               </Field>
             </div>
-            
-            <div className="flex flex-col gap-1 flex-1 min-h-0">
-              <span className="font-mono text-[9px] uppercase tracking-widest text-white/50">
-                LYRICS — {validLinesCount} LINES
-              </span>
-              
-              <div className="relative flex-1 min-h-0 border border-border bg-black focus-within:border-cream/60">
-                <textarea
-                  value={song.lyrics}
-                  onChange={(e) => onChange({ lyrics: e.target.value })}
-                  placeholder={'one line per row\nthe engine weights each line by syllables'}
-                  className="w-full h-full bg-transparent p-3 pl-8 font-mono text-xs text-white placeholder:text-white/20 focus:outline-none resize-none leading-[22px]"
-                />
 
-                <div className="absolute top-0 left-0 right-0 bottom-0 pointer-events-none p-3 flex flex-col leading-[22px] overflow-hidden">
-                  {lyricLines.map((line, idx) => {
-                    const text = line.trim()
-                    if (!text) return <div key={idx} className="h-[22px]" />
-                    return (
-                      <div key={idx} className="h-[22px] flex items-center">
+            <div className="flex flex-col gap-1 flex-1 min-h-0">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[9px] uppercase tracking-widest text-white/50">
+                  LYRICS — {lyricLines.length} LINES
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsBulkEditing(!isBulkEditing)}
+                  className="font-mono text-[9px] uppercase tracking-widest text-yellow-300 hover:text-yellow-200 flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  {isBulkEditing ? (
+                    <>
+                      <Check className="h-2.5 w-2.5" /> Done
+                    </>
+                  ) : (
+                    <>
+                      <Edit3 className="h-2.5 w-2.5" /> Edit Raw Text
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="relative flex-1 min-h-0 border border-border bg-black focus-within:border-cream/60 overflow-hidden">
+                {isBulkEditing ? (
+                  <textarea
+                    autoFocus
+                    value={song.lyrics}
+                    onChange={(e) => onChange({ lyrics: e.target.value })}
+                    placeholder="Paste entire lyrics block here (one line per row)..."
+                    className="w-full h-full p-3 bg-transparent font-mono text-xs text-white placeholder:text-white/20 focus:outline-none resize-none leading-[22px]"
+                  />
+                ) : (
+                  <div className="w-full h-full overflow-y-auto p-2 flex flex-col gap-1">
+                    {lyricLines.map((line, idx) => {
+                      const isEditingThis = editingIndex === idx
+
+                      if (isEditingThis) {
+                        return (
+                          <div key={idx} className="h-[26px] flex items-center">
+                            <input
+                              autoFocus
+                              type="text"
+                              value={line}
+                              onChange={(e) => updateLineText(idx, e.target.value)}
+                              onBlur={() => setEditingIndex(null)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') setEditingIndex(null)
+                              }}
+                              className="w-full bg-white/10 text-white font-mono text-xs px-2 py-1 focus:outline-none border border-cream/60 rounded-xs"
+                            />
+                          </div>
+                        )
+                      }
+
+                      return (
                         <div
+                          key={idx}
                           draggable
                           onDragStart={(e) => {
-                            e.dataTransfer.setData('text/plain', text)
+                            e.dataTransfer.setData('text/plain', line)
                           }}
-                          className="pointer-events-auto flex items-center gap-1.5 w-full cursor-grab active:cursor-grabbing text-yellow-300 hover:text-yellow-200 transition-colors group"
-                          title="Drag line to timeline"
+                          onDoubleClick={() => setEditingIndex(idx)}
+                          className="h-[26px] flex items-center gap-2 px-2 rounded transition-colors select-none cursor-grab active:cursor-grabbing hover:bg-white/10 border border-transparent hover:border-white/20 group"
+                          title="Drag line to timeline (Double-click to edit)"
                         >
-                          <GripVertical className="h-3.5 w-3.5 shrink-0" />
-                          <span className="font-mono text-xs text-transparent select-none pointer-events-none truncate">
-                            {text}
+                          <GripVertical className="h-3 w-3 shrink-0 text-yellow-300 opacity-70 group-hover:opacity-100" />
+                          <span className="font-mono text-xs text-white truncate w-full">
+                            {line}
                           </span>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
