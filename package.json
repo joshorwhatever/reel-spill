@@ -7,8 +7,7 @@
     "build": "next build",
     "start": "next start"
   },
-"dependencies": {
-  "openai": "^4.68.0",
+  "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@vercel/analytics": "1.6.1",
     "class-variance-authority": "^0.7.1",
@@ -17,6 +16,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",
     "next": "16.3.3",
+    "openai": "^4.68.0",
     "react": "^19",
     "react-dom": "^19",
     "shadcn": "^4.11.0",
