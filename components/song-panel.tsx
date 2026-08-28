@@ -1,14 +1,15 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import type { SongState } from '@/lib/types'
+import type { SongState, LyricLine } from '@/lib/types'
 import { Panel, Field } from '@/components/primitives'
 import { GripVertical, Edit3, Check, Wand2 } from 'lucide-react'
+import { alignLyricsWithWhisper } from '@/lib/generate'
 
 interface SongPanelProps {
   song: SongState
   onChange: (patch: Partial<SongState>) => void
-  onLyricsAligned?: (alignedLyrics: Array<{ text: string; start: number; end: number }>) => void
+  onLyricsAligned?: (alignedLyrics: LyricLine[]) => void
 }
 
 function formatDuration(seconds: number): string {
@@ -16,46 +17,6 @@ function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60)
   const secs = Math.floor(seconds % 60)
   return `${mins}m${secs.toString().padStart(2, '0')}s`
-}
-
-// Whisper auto-alignment: Speech timestamps override all default beat/bar rules
-async function alignLyricsWithWhisper(file: File, lyricLines: string[]) {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('model', 'whisper-1')
-  formData.append('response_format', 'verbose_json')
-  formData.append('timestamp_granularities[]', 'segment')
-  
-  // Provide full lyrics and structural scale guidance (16 bars / 2 verses) to anchor Whisper
-  const promptContext = `Target arrangement: 16 bars across 2 verses. Exact lyrics guide:\n${lyricLines.join('\n')}`
-  formData.append('prompt', promptContext)
-
-  const response = await fetch('/api/whisper-align', {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!response.ok) {
-    throw new Error('Whisper alignment API request failed')
-  }
-
-  const data = await response.json()
-  const segments: Array<{ text: string; start: number; end: number }> = data.segments || []
-
-  // Map each lyric line strictly to when the audio segment starts and stops being spoken
-  return lyricLines.map((line, index) => {
-    const matchingSegment = segments[index]
-    if (matchingSegment) {
-      return {
-        text: line,
-        start: matchingSegment.start,
-        end: matchingSegment.end,
-      }
-    }
-    // Fallback placement if segments run short
-    const fallbackStart = index * 4
-    return { text: line, start: fallbackStart, end: fallbackStart + 3.5 }
-  })
 }
 
 export function SongPanel({ song, onChange, onLyricsAligned }: SongPanelProps) {
@@ -86,7 +47,12 @@ export function SongPanel({ song, onChange, onLyricsAligned }: SongPanelProps) {
     if (!song.file || lyricLines.length === 0) return
     setIsAligning(true)
     try {
-      const aligned = await alignLyricsWithWhisper(song.file, lyricLines)
+      const aligned = await alignLyricsWithWhisper(
+        song.file,
+        song.bpm || 120,
+        song.lyrics,
+        16
+      )
       if (onLyricsAligned) {
         onLyricsAligned(aligned)
       }

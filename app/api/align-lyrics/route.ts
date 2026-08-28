@@ -1,53 +1,36 @@
 import { NextResponse } from 'next/server'
+import OpenAI from 'openai'
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) {
-      return NextResponse.json({ error: 'OpenAI API key is missing in environment variables' }, { status: 500 })
-    }
-
     const formData = await req.formData()
-    const file = formData.get('file') as File | null
-    const prompt = formData.get('prompt') as string | null
+    const file = formData.get('file') as File
+    const prompt = formData.get('prompt') as string
 
     if (!file) {
-      return NextResponse.json({ error: 'Audio file is required' }, { status: 400 })
+      return NextResponse.json({ error: 'No audio file provided' }, { status: 400 })
     }
 
-    const openaiFormData = new FormData()
-    openaiFormData.append('file', file)
-    openaiFormData.append('model', 'whisper-1')
-    openaiFormData.append('response_format', 'verbose_json')
-    openaiFormData.append('timestamp_granularities[]', 'segment')
-    openaiFormData.append('timestamp_granularities[]', 'word')
-    if (prompt) {
-      openaiFormData.append('prompt', prompt)
-    }
-
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: openaiFormData,
+    const transcription = await openai.audio.transcriptions.create({
+      file: file,
+      model: 'whisper-1',
+      response_format: 'verbose_json',
+      timestamp_granularities: ['word', 'segment'],
+      prompt: prompt || undefined,
     })
-
-    if (!response.ok) {
-      const errText = await response.text()
-      throw new Error(`OpenAI API error: ${errText}`)
-    }
-
-    const transcription = await response.json()
 
     return NextResponse.json({
       segments: transcription.segments || [],
       words: transcription.words || [],
     })
   } catch (error: any) {
-    console.error('Whisper Alignment Error:', error)
+    console.error('Whisper alignment API error:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to align audio with Whisper' },
+      { error: error.message || 'Failed to align lyrics' },
       { status: 500 }
     )
   }

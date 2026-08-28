@@ -6,18 +6,20 @@ type GenerateOptions = {
   count: number
   modes: ReelMode[]
   baseName: string
-}
-
-type WhisperSegment = {
-  start: number
-  end: number
-  text: string
+  existingLyrics?: LyricLine[]
 }
 
 type WhisperWord = {
   word: string
   start: number
   end: number
+}
+
+type WhisperSegment = {
+  start: number
+  end: number
+  text: string
+  words?: WhisperWord[]
 }
 
 function parseLyrics(raw: string): string[] {
@@ -38,6 +40,8 @@ export async function alignLyricsWithWhisper(
   totalBars: number = 16
 ): Promise<LyricLine[]> {
   const parsedLines = parseLyrics(fallbackLyrics)
+  const secondsPerBeat = 60 / bpm
+  const maxDuration = totalBars * 4 * secondsPerBeat
 
   try {
     const formData = new FormData()
@@ -52,20 +56,20 @@ export async function alignLyricsWithWhisper(
     })
 
     if (!response.ok) {
-      throw new Error('Whisper alignment failed')
+      const errData = await response.json().catch(() => ({}))
+      throw new Error(errData.error || 'Whisper alignment failed')
     }
 
     const data = await response.json()
     const segments: WhisperSegment[] = data.segments || []
-    const words: WhisperWord[] = data.words || []
+    const words: WhisperWord[] = data.words || segments.flatMap((s) => s.words || [])
 
-    const secondsPerBeat = 60 / bpm
-    const maxDuration = totalBars * 4 * secondsPerBeat
+    if (parsedLines.length === 0) return []
 
-    // 1. Precise Word-Level Alignment: Match each line's first and last word timestamps
-    if (parsedLines.length > 0 && words.length > 0) {
+    const alignedLines: LyricLine[] = []
+
+    if (words.length > 0) {
       let wordPointer = 0
-      const alignedLines: LyricLine[] = []
 
       for (let i = 0; i < parsedLines.length; i++) {
         const lineText = parsedLines[i]
@@ -73,8 +77,8 @@ export async function alignLyricsWithWhisper(
 
         if (lineTokens.length === 0) continue
 
-        let lineStart = -1
-        let lineEnd = -1
+        let lineStart: number | null = null
+        let lineEnd: number | null = null
         let matchedCount = 0
 
         for (let j = wordPointer; j < words.length; j++) {
@@ -83,117 +87,86 @@ export async function alignLyricsWithWhisper(
 
           if (!cleanedW) continue
 
-          if (lineTokens.includes(cleanedW)) {
-            if (lineStart === -1) {
-              lineStart = w.start
-            }
+          const tokenMatchIndex = lineTokens.findIndex(
+            (token, tIdx) => tIdx >= matchedCount && token === cleanedW
+          )
+
+          if (tokenMatchIndex !== -1) {
+            if (lineStart === null) lineStart = w.start
             lineEnd = w.end
             wordPointer = j + 1
             matchedCount++
 
-            if (matchedCount >= Math.min(2, lineTokens.length)) {
-              // Found match context for this line
-              if (j + lineTokens.length - matchedCount < words.length) {
-                const targetIdx = Math.min(words.length - 1, j + (lineTokens.length - matchedCount))
-                lineEnd = words[targetIdx].end
-                wordPointer = targetIdx + 1
+            if (matchedCount >= Math.min(lineTokens.length, 3)) {
+              const remainingTokens = lineTokens.length - matchedCount
+              if (remainingTokens > 0 && j + remainingTokens < words.length) {
+                lineEnd = words[j + remainingTokens].end
+                wordPointer = j + 1 + remainingTokens
               }
               break
             }
           }
         }
 
-        if (lineStart !== -1 && lineEnd !== -1) {
+        if (lineStart !== null && lineEnd !== null) {
           alignedLines.push({
             id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
             text: lineText,
             start: +Math.max(0, lineStart).toFixed(3),
-            end: +Math.max(lineStart + 0.1, lineEnd).toFixed(3),
+            end: +Math.max(lineStart + 0.3, lineEnd).toFixed(3),
+          })
+        } else {
+          // Fallback placement for unmatched lines based on previous line end
+          const prevEnd = alignedLines.length > 0 ? alignedLines[alignedLines.length - 1].end : 0
+          const estimatedStart = prevEnd + 0.3
+          alignedLines.push({
+            id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
+            text: lineText,
+            start: +Math.min(maxDuration, estimatedStart).toFixed(3),
+            end: +Math.min(maxDuration, estimatedStart + 1.5).toFixed(3),
           })
         }
       }
+    } else if (segments.length > 0) {
+      parsedLines.forEach((lineText, idx) => {
+        const seg = segments[Math.min(segments.length - 1, idx)]
+        const start = +Math.max(0, seg.start).toFixed(3)
+        const end = +Math.max(start + 0.5, seg.end).toFixed(3)
 
-      if (alignedLines.length > 0) {
-        return alignedLines.filter((l) => l.start < maxDuration)
-      }
-    }
-
-    // 2. Segment Fallback: Direct segment speech timestamps
-    if (segments.length > 0) {
-      if (parsedLines.length > 0) {
-        const lyricCount = parsedLines.length
-        const segCount = segments.length
-
-        return parsedLines
-          .map((lineText, idx) => {
-            const segStartIdx = Math.floor((idx / lyricCount) * segCount)
-            const segEndIdx = Math.min(
-              segCount - 1,
-              Math.max(segStartIdx, Math.floor(((idx + 1) / lyricCount) * segCount) - 1)
-            )
-
-            const start = +Math.max(0, segments[segStartIdx].start).toFixed(3)
-            const end = +Math.max(start + 0.1, segments[segEndIdx].end).toFixed(3)
-
-            return {
-              id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
-              text: lineText,
-              start,
-              end,
-            }
-          })
-          .filter((l) => l.start < maxDuration)
-      }
-
-      return segments
-        .map((seg) => ({
+        alignedLines.push({
           id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
-          text: seg.text.trim(),
-          start: +Math.max(0, seg.start).toFixed(3),
-          end: +Math.max(seg.start + 0.1, seg.end).toFixed(3),
-        }))
-        .filter((l) => l.start < maxDuration)
+          text: lineText,
+          start,
+          end: Math.min(maxDuration, end),
+        })
+      })
     }
 
-    return createBeatGridLyricTimeline(parsedLines, bpm, totalBars)
+    if (alignedLines.length > 0) {
+      return alignedLines.filter((l) => l.start < maxDuration)
+    }
+
+    throw new Error('No valid alignment mapping generated')
   } catch (err) {
-    console.warn('Whisper alignment error, using grid fallback:', err)
-    return createBeatGridLyricTimeline(parsedLines, bpm, totalBars)
+    console.warn('Whisper alignment error, using fallback timeline:', err)
+    return createFallbackTimeline(parsedLines, maxDuration)
   }
 }
 
-function createBeatGridLyricTimeline(
-  lines: string[],
-  bpm: number,
-  totalBars: number = 16
-): LyricLine[] {
+function createFallbackTimeline(lines: string[], maxDuration: number): LyricLine[] {
   if (lines.length === 0) return []
+  const durationPerLine = maxDuration / lines.length
 
-  const secondsPerBeat = 60 / bpm
-  const beatsPerBar = 4
-  const totalBeats = totalBars * beatsPerBar
-  const barsPerLine = Math.max(1, Math.floor(totalBars / lines.length))
-
-  const result: LyricLine[] = []
-
-  lines.forEach((text, i) => {
-    const startBeat = i * barsPerLine * beatsPerBar
-    if (startBeat >= totalBeats) return
-
-    const endBeat = Math.min(startBeat + barsPerLine * beatsPerBar, totalBeats)
-
-    const start = +(startBeat * secondsPerBeat).toFixed(3)
-    const end = +(endBeat * secondsPerBeat).toFixed(3)
-
-    result.push({
+  return lines.map((text, i) => {
+    const start = +(i * durationPerLine).toFixed(3)
+    const end = +Math.min(maxDuration, (i + 1) * durationPerLine).toFixed(3)
+    return {
       id: `lyric-${Math.random().toString(36).substring(2, 9)}`,
       text,
       start,
       end,
-    })
+    }
   })
-
-  return result
 }
 
 function getClipsForMode(
@@ -338,6 +311,7 @@ export async function generateReels({
   count,
   modes,
   baseName,
+  existingLyrics,
 }: GenerateOptions): Promise<Reel[]> {
   const bpm = song.bpm || 120
   const totalBars = 16
@@ -346,10 +320,13 @@ export async function generateReels({
 
   let lyrics: LyricLine[] = []
 
-  if (song.file) {
+  // If user has edited lyrics on the timeline, respect them unless an explicit sync is forced
+  if (existingLyrics && existingLyrics.length > 0) {
+    lyrics = existingLyrics
+  } else if (song.file) {
     lyrics = await alignLyricsWithWhisper(song.file, bpm, song.lyrics, totalBars)
   } else {
-    lyrics = createBeatGridLyricTimeline(parseLyrics(song.lyrics), bpm, totalBars)
+    lyrics = createFallbackTimeline(parseLyrics(song.lyrics), reelDuration)
   }
 
   const reels: Reel[] = []

@@ -35,7 +35,6 @@ export function Timeline({
   const [drag, setDrag] = useState<Drag | null>(null)
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false)
 
-  // Safe fallbacks so it never crashes if reel or its properties are undefined
   const duration = reel?.duration || 1
   const clips = reel?.clips || []
   const lyrics = reel?.lyrics || []
@@ -126,7 +125,7 @@ export function Timeline({
         ))}
       </div>
 
-      {/* 2. Audio Track (Song placement/offset) */}
+      {/* 2. Audio Track */}
       <div className="relative h-2 w-full bg-zinc-900 border border-white/10 rounded-sm overflow-hidden">
         {reel?.audioTrack && (
           <div
@@ -139,7 +138,7 @@ export function Timeline({
         )}
       </div>
 
-      {/* 3. Lyric Track + YouTube-style smooth scrub surface */}
+      {/* 3. Lyric Track */}
       <div
         ref={trackRef}
         onPointerDown={(e) => {

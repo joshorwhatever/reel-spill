@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import type {
   CaptionStyle,
   CustomFont,
+  LyricLine,
   Reel,
   ReelMode,
   SongState,
@@ -32,6 +33,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
   drag: Drag,
   delta: number,
   reelDur: number,
+  shouldSnap: boolean,
   snapToTick: (t: number) => number
 ): T[] {
   const minLen = 0.08
@@ -46,7 +48,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
   if (edge === 'move') {
     const len = origEnd - origStart
     const rawStart = Math.max(0, Math.min(reelDur - len, origStart + delta))
-    const start = snapToTick(rawStart)
+    const start = shouldSnap ? snapToTick(rawStart) : rawStart
     target.start = +start.toFixed(3)
     target.end = +(start + len).toFixed(3)
     return sorted
@@ -54,7 +56,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
 
   if (edge === 'right') {
     const rawEnd = Math.min(reelDur, Math.max(origStart + minLen, origEnd + delta))
-    const newEnd = snapToTick(rawEnd)
+    const newEnd = shouldSnap ? snapToTick(rawEnd) : rawEnd
     target.end = +newEnd.toFixed(3)
 
     return sorted.filter((item) => {
@@ -73,7 +75,7 @@ function handleTrackDrag<T extends { id: string; start: number; end: number }>(
 
   if (edge === 'left') {
     const rawStart = Math.max(0, Math.min(origEnd - minLen, origStart + delta))
-    const newStart = snapToTick(rawStart)
+    const newStart = shouldSnap ? snapToTick(rawStart) : rawStart
     target.start = +newStart.toFixed(3)
 
     return sorted.filter((item) => {
@@ -105,6 +107,7 @@ export default function Page() {
   const [assets, setAssets] = useState<VideoAsset[]>([])
   const [customFonts, setCustomFonts] = useState<CustomFont[]>([])
   const [reels, setReels] = useState<Reel[]>([])
+  const [syncedLyrics, setSyncedLyrics] = useState<LyricLine[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedLyricId, setSelectedLyricId] = useState<string | null>(null)
   const [modes, setModes] = useState<ReelMode[]>([])
@@ -143,7 +146,7 @@ export default function Page() {
     name: 'Hypothetical Track',
     duration: song.duration || 32,
     clips: [],
-    lyrics: [],
+    lyrics: syncedLyrics,
   }
 
   const baseDuration = hypotheticalReel.duration || 1
@@ -180,6 +183,29 @@ export default function Page() {
 
   const latest = useRef({ drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel, maxDur })
   latest.current = { drag, hypotheticalReel, duration, isScrubbing, cuePoint, selectedLyricId, activeReel, maxDur }
+
+  const handleLyricsAligned = (alignedLyrics: LyricLine[]) => {
+    setSyncedLyrics(alignedLyrics)
+
+    if (reels.length === 0) {
+      const defaultReel: Reel = {
+        id: 'reel-1',
+        name: 'Reel 1',
+        duration: song.duration || 32,
+        clips: [],
+        lyrics: alignedLyrics,
+      }
+      setReels([defaultReel])
+      setSelectedId(defaultReel.id)
+    } else {
+      setReels((prev) =>
+        prev.map((r) => ({
+          ...r,
+          lyrics: alignedLyrics,
+        }))
+      )
+    }
+  }
 
   const startDragging = (dragInfo: Drag) => {
     if (activeReel) {
@@ -317,12 +343,12 @@ export default function Page() {
           if (d.type === 'lyric') {
             return {
               ...r,
-              lyrics: handleTrackDrag(currentSnapshot.lyrics || [], d, delta, reelDur, snapToTick),
+              lyrics: handleTrackDrag(currentSnapshot.lyrics || [], d, delta, reelDur, false, snapToTick),
             }
           } else {
             return {
               ...r,
-              clips: handleTrackDrag(currentSnapshot.clips || [], d, delta, reelDur, snapToTick),
+              clips: handleTrackDrag(currentSnapshot.clips || [], d, delta, reelDur, true, snapToTick),
             }
           }
         })
@@ -350,10 +376,8 @@ export default function Page() {
     setIsGenerating(true)
     
     try {
-      // Deep copy to mutate safely
       let safeSong = { ...song }
 
-      // Safeguard: Reconstruct the File object if state wiped it but kept the URL
       if (!safeSong.file && safeSong.url) {
         try {
           const res = await fetch(safeSong.url)
@@ -361,7 +385,6 @@ export default function Page() {
           safeSong.file = new File([blob], safeSong.name || 'audio.mp3', { 
             type: blob.type || 'audio/mpeg' 
           })
-          console.log('Successfully reconstructed File from URL for Whisper')
         } catch (err) {
           console.warn('Failed to reconstruct File from blob URL:', err)
         }
@@ -373,6 +396,7 @@ export default function Page() {
         count: reelCount,
         modes,
         baseName: baseName.trim() || safeSong.name || 'reel',
+        existingLyrics: syncedLyrics.length > 0 ? syncedLyrics : undefined,
       })
       setReels(generated)
       if (generated.length > 0) {
@@ -430,6 +454,7 @@ export default function Page() {
           <SongPanel
             song={song}
             onChange={(patch) => setSong((s) => ({ ...s, ...patch }))}
+            onLyricsAligned={handleLyricsAligned}
           />
           <ContentPanel assets={assets} onChange={setAssets} />
           <FontPanel
@@ -516,7 +541,6 @@ export default function Page() {
                   {visualMarkers.map((m, i) => {
                     const b = m.time
                     const isCue = cuePoint === b
-                    // Strict single-tick active highlight
                     const isActive = Math.abs(time - b) < 0.001
                     return (
                       <div
@@ -629,12 +653,12 @@ export default function Page() {
                     e.preventDefault()
                     const text = e.dataTransfer.getData('text/plain')
                     if (!text || !activeReel) return
-                    const dropTime = snapToTick(xToTime(e.clientX))
-                    const defaultLen = markerInterval * 2
+                    const dropTime = xToTime(e.clientX)
+                    const defaultLen = 2.5
                     const newLyric = {
                       id: Math.random().toString(36).substring(2, 9),
                       text,
-                      start: dropTime,
+                      start: +dropTime.toFixed(3),
                       end: +(dropTime + defaultLen).toFixed(3),
                     }
 
