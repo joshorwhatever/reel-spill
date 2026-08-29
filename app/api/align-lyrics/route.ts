@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     }
 
     const targetEndpoint =
-      process.env.WHISPER_API_URL || 'http://127.0.0.1:8001/v1/audio/transcriptions'
+      process.env.WHISPER_API_URL || 'https://7fd600ba0d9780.lhr.life/v1/audio/transcriptions'
 
     const response = await fetch(targetEndpoint, {
       method: 'POST',
