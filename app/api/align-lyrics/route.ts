@@ -1,9 +1,4 @@
 import { NextResponse } from 'next/server'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
 
 export async function POST(req: Request) {
   try {
@@ -15,13 +10,36 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 })
     }
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: file,
-      model: 'whisper-1',
-      response_format: 'verbose_json',
-      timestamp_granularities: ['word', 'segment'],
-      prompt: prompt || undefined,
+    // Bypass the 'openai' npm package to avoid CSP/eval sandbox errors.
+    // Native fetch works perfectly with OpenAI's multipart/form-data endpoints.
+    const openAiFormData = new FormData()
+    openAiFormData.append('file', file)
+    openAiFormData.append('model', 'whisper-1')
+    openAiFormData.append('response_format', 'verbose_json')
+    
+    // Pass array items individually as required by OpenAI's form-data parsing
+    openAiFormData.append('timestamp_granularities[]', 'word')
+    openAiFormData.append('timestamp_granularities[]', 'segment')
+    
+    if (prompt) {
+      openAiFormData.append('prompt', prompt)
+    }
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: openAiFormData,
     })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('OpenAI Raw Error:', errorText)
+      throw new Error(`OpenAI API failed: ${response.statusText}`)
+    }
+
+    const transcription = await response.json()
 
     return NextResponse.json({
       segments: transcription.segments || [],
