@@ -3,8 +3,9 @@
 import { useRef, useState } from 'react'
 import type { SongState, LyricLine } from '@/lib/types'
 import { Panel, Field } from '@/components/primitives'
-import { GripVertical, Edit3, Check, Wand2 } from 'lucide-react'
+import { GripVertical, Edit3, Check, Wand2, AlertTriangle } from 'lucide-react'
 import { alignLyricsWithWhisper } from '@/lib/generate'
+import { cn } from '@/lib/utils'
 
 interface SongPanelProps {
   song: SongState
@@ -24,6 +25,7 @@ export function SongPanel({ song, onChange, onLyricsAligned }: SongPanelProps) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [isBulkEditing, setIsBulkEditing] = useState<boolean>(!song.lyrics)
   const [isAligning, setIsAligning] = useState(false)
+  const [syncFailed, setSyncFailed] = useState(false)
   const beatDuration = 60 / (song.bpm || 120)
 
   const rawLines = song.lyrics ? song.lyrics.split('\n') : []
@@ -46,18 +48,25 @@ export function SongPanel({ song, onChange, onLyricsAligned }: SongPanelProps) {
   const handleAlignWhisper = async () => {
     if (!song.file || lyricLines.length === 0) return
     setIsAligning(true)
+    setSyncFailed(false)
     try {
-      const aligned = await alignLyricsWithWhisper(
+      const res = await alignLyricsWithWhisper(
         song.file,
         song.bpm || 120,
         song.lyrics,
         16
       )
+      
+      if (res.hasError) {
+        setSyncFailed(true)
+      }
+
       if (onLyricsAligned) {
-        onLyricsAligned(aligned)
+        onLyricsAligned(res.lines)
       }
     } catch (err) {
       console.error('Whisper alignment error:', err)
+      setSyncFailed(true)
     } finally {
       setIsAligning(false)
     }
@@ -155,10 +164,20 @@ export function SongPanel({ song, onChange, onLyricsAligned }: SongPanelProps) {
                       type="button"
                       onClick={handleAlignWhisper}
                       disabled={isAligning}
-                      className="font-mono text-[9px] uppercase tracking-widest text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                      className={cn(
+                        'font-mono text-[9px] uppercase tracking-widest flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50 px-1.5 py-0.5 rounded-xs',
+                        syncFailed
+                          ? 'text-red-400 hover:text-red-300 border border-red-500/50 bg-red-500/10 shadow-[0_0_6px_rgba(239,68,68,0.2)]'
+                          : 'text-cyan-400 hover:text-cyan-300'
+                      )}
+                      title={syncFailed ? 'Section alignment failed' : undefined}
                     >
-                      <Wand2 className={`h-2.5 w-2.5 ${isAligning ? 'animate-spin' : ''}`} />
-                      {isAligning ? 'Aligning...' : 'Whisper Sync'}
+                      {syncFailed ? (
+                        <AlertTriangle className="h-2.5 w-2.5 text-red-400" />
+                      ) : (
+                        <Wand2 className={`h-2.5 w-2.5 ${isAligning ? 'animate-spin' : ''}`} />
+                      )}
+                      {isAligning ? 'Aligning...' : syncFailed ? 'Sync Failed' : 'Whisper Sync'}
                     </button>
                   )}
                   <button
