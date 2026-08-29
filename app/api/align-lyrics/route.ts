@@ -14,31 +14,27 @@ export async function POST(req: Request) {
 
     const whisperFormData = new FormData()
     whisperFormData.append('file', file, file.name || 'audio.mp3')
-    whisperFormData.append('model', 'whisper-1')
+    
+    // Set model to 'base' to match the Docker container default
+    whisperFormData.append('model', 'base')
     whisperFormData.append('response_format', 'verbose_json')
-    whisperFormData.append('timestamp_granularities[]', 'word')
-    whisperFormData.append('timestamp_granularities[]', 'segment')
+    whisperFormData.append('timestamp_granularities', 'word')
 
     if (prompt) {
       whisperFormData.append('prompt', prompt)
     }
 
-    // Default to local Docker container on port 8001 if WHISPER_API_URL is unset
     const targetEndpoint =
       process.env.WHISPER_API_URL || 'http://127.0.0.1:8001/v1/audio/transcriptions'
-    const apiKey = process.env.OPENAI_API_KEY || 'local-whisper-key'
 
     const response = await fetch(targetEndpoint, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
       body: whisperFormData,
     })
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error('Whisper Service Error:', errorText)
+      console.error('--- Local Whisper Error Response ---', errorText)
       return NextResponse.json(
         { error: `Whisper service error: ${errorText}` },
         { status: response.status }
